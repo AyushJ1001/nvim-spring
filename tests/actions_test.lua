@@ -1244,9 +1244,13 @@ public class App {
         }),
       })
       plugin:apply_code_action(plugin:code_actions()[1])
-      local java = adapters.fs:read("src/main/java/com/example/App.java")
-      assert_contains(java, "import com.google.common.collect.ImmutableList;")
-      assert_contains(java, "int extra;")
+      assert_eq(adapters.fs:read("src/main/java/com/example/App.java"), FQCN_JAVA)
+      assert_contains(adapters.ui.buffer, "import com.google.common.collect.ImmutableList;")
+      assert_contains(adapters.ui.buffer, "  ImmutableList<String> xs;")
+      assert_contains(adapters.ui.buffer, "int extra;")
+      for _, path in ipairs(adapters.fs.writes) do
+        assert_not_contains(path, "App.java")
+      end
     end,
   },
   {

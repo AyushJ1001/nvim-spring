@@ -143,6 +143,13 @@ function fakes.ui(opts)
       return self.buffer
     end or nil,
     buffer = opts.buffer,
+    edit_buffer = function(self, _, content)
+      if not self.buffer then
+        return false
+      end
+      self.buffer = content
+      return true
+    end,
     confirm = function(self, message)
       self.confirm_calls = self.confirm_calls + 1
       self.last_confirm = message

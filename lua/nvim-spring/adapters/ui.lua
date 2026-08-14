@@ -149,7 +149,7 @@ end
 function M:edit_buffer(path, content)
   local bufnr = vim.fn.bufnr(path)
   if bufnr == -1 or not vim.api.nvim_buf_is_loaded(bufnr) then
-    return
+    return false
   end
   local lines = vim.split(content, "\n", { plain = true })
   local last = lines[#lines]
@@ -157,6 +157,7 @@ function M:edit_buffer(path, content)
     lines[#lines] = nil
   end
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  return true
 end
 
 local CODE_ACTION_CMD = "nvim-spring.apply_code_action"

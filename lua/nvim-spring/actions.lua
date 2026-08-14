@@ -418,10 +418,10 @@ function Actions:_read_java(path)
 end
 
 function Actions:_write_java(path, content)
-  self.fs:write(path, content)
-  if self.ui and self.ui.edit_buffer then
-    self.ui:edit_buffer(path, content)
+  if self.ui and self.ui.edit_buffer and self.ui:edit_buffer(path, content) then
+    return
   end
+  self.fs:write(path, content)
 end
 
 function Actions:_fix_java_buffer(action, hit)
