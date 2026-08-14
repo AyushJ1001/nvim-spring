@@ -1222,6 +1222,44 @@ public class App {
     end,
   },
   {
+    "type-local action keeps a conflicting simple name fully qualified",
+    function()
+      local java = [[
+package com.example;
+
+import com.acme.ImmutableList;
+
+public class App {
+  com.google.common.collect.ImmutableList<String> xs;
+}
+]]
+      local plugin, adapters = type_local_plugin({
+        java = java,
+        diagnostics = {
+          {
+            file = JAVA_PATH,
+            code = 16777218,
+            lnum = 5,
+            col = 2,
+            end_lnum = 5,
+            end_col = 41,
+          },
+        },
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:apply_code_action(plugin:code_actions()[1])
+      local after = adapters.fs:read("src/main/java/com/example/App.java")
+      assert_contains(after, "import com.acme.ImmutableList;")
+      assert_not_contains(after, "import com.google.common.collect.ImmutableList;")
+      assert_contains(after, "  com.google.common.collect.ImmutableList<String> xs;")
+      assert_contains(adapters.fs:read("pom.xml"), "<artifactId>guava</artifactId>")
+    end,
+  },
+  {
     "type-local Java fix uses the open buffer, not a stale file",
     function()
       local plugin, adapters = type_local_plugin({

@@ -351,6 +351,27 @@ local function is_import_line(line)
   return line:match("^%s*import%s") ~= nil
 end
 
+local function single_type_import(line)
+  if not line or line:match("^%s*import%s+static%s") then
+    return nil
+  end
+  return line:match("^%s*import%s+([%w%.]+)%s*;")
+end
+
+local function conflicting_single_type_import(source, fqcn)
+  local name = simple_name(fqcn)
+  if not name or name == "" then
+    return false
+  end
+  for _, line in ipairs(split_lines(source)) do
+    local imported = single_type_import(line)
+    if imported and imported ~= fqcn and simple_name(imported) == name then
+      return true
+    end
+  end
+  return false
+end
+
 local function replace_range_with_simple(source, range, fqcn)
   if not range or range.lnum == nil then
     return source
@@ -437,6 +458,9 @@ function Actions:_fix_java_buffer(action, hit)
   end
   local source = self:_read_java(action.file)
   if not source then
+    return
+  end
+  if conflicting_single_type_import(source, fqcn) then
     return
   end
   local next_src = replace_range_with_simple(source, action.range, fqcn)

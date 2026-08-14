@@ -179,7 +179,19 @@ local function to_lsp_actions(actions)
   return out
 end
 
+local function bufnr_for_params(params, fallback)
+  local uri = params and params.textDocument and params.textDocument.uri
+  if uri and vim.uri_to_fname then
+    local nr = vim.fn.bufnr(vim.uri_to_fname(uri))
+    if nr ~= -1 then
+      return nr
+    end
+  end
+  return fallback
+end
+
 local function ctx_from_params(params, bufnr)
+  bufnr = bufnr_for_params(params, bufnr)
   local path = vim.api.nvim_buf_get_name(bufnr)
   if params and params.textDocument and params.textDocument.uri and vim.uri_to_fname then
     path = vim.uri_to_fname(params.textDocument.uri)
