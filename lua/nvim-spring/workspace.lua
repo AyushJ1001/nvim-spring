@@ -116,4 +116,21 @@ function M.classify(fs)
   return { refuse = false, reason = "ok" }
 end
 
+function M.is_boot(fs)
+  if not fs or not fs.exists or not fs:exists("pom.xml") then
+    return false
+  end
+  local pom = fs:read("pom.xml") or ""
+  if boot_version_from_pom(pom) then
+    return true
+  end
+  for dep in pom:gmatch("<dependency[^>]*>(.-)</dependency>") do
+    local artifact = tag(dep, "artifactId") or ""
+    if artifact == "spring-boot-dependencies" or artifact:find("^spring%-boot%-starter") then
+      return true
+    end
+  end
+  return false
+end
+
 return M
