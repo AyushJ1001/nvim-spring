@@ -43,6 +43,26 @@ Recommended maps (not a frozen chord contract): `<leader>si`, `<leader>sc`, `<le
 
 On an unresolved type in a Java buffer (jdtls `UNDEFINED_TYPE` / `UNDEFINED_NAME`), a type-local code action offers to add a **Dependency**. It uses the same find/write/reload path as `:SpringAddDependency` and also writes the import / simple name. With no jdtls client the offer is absent. Init, run, and **Package view** are not code actions.
 
+## Run and Reload
+
+`:SpringRun` starts vanilla `spring-boot:run` in a Plugin-owned terminal buffer. It prefers `./mvnw` when a wrapper exists, otherwise `mvn`. There is no profile picker, no extra-args UI, no exploded-`java` launcher, and no `java -jar` Reload path. Missing `mvnw` and `mvn` is a loud-refuse.
+
+`:SpringStop` stops only the Plugin-started process. A `spring-boot:run` you started yourself is not hijacked.
+
+**Reload** is Spring Boot DevTools automatically restarting the application context when classes and resources land in Maven `target/classes`. It is not LiveReload, not JRebel-style rewrite, and not JVM hot-swap. There is no trigger file — DevTools uses its default poll and quiet period.
+
+The Plugin owns compile-on-save: incremental jdtls compile of `.java` files, plus a copy of `src/main/resources` (including `application.yml`, templates, and static) into `target/classes`. A user-started `spring-boot:run` still Reloads when that compile, DevTools, and an exploded Maven run are in place.
+
+If `spring-boot-devtools` is not on the runtime classpath, the app still starts. The Plugin says Reload will not happen and offers to add the Dependency through the add-Dependency path. It never silent-edits the POM.
+
+### Debug
+
+Generic DAP is compose-if-present only. This Plugin does not add a Spring-specific debug launch, attach, Actuator live, or test-debug.
+
+Reload and DAP Hot Code Replace fight if a debugger is attached to a Plugin-started `spring-boot:run`. The Plugin does not detect JDWP and does not disable DevTools while debugging.
+
+Spring-specific debugging is next-version WIP.
+
 ## Workspace contract
 
 First cut is one non-reactor Maven project at the workspace root, Spring Boot 3.0+ / 4.x at **Language level** 17+.

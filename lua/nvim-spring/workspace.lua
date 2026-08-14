@@ -71,6 +71,24 @@ local function language_level_from_pom(xml)
   return parse_language_level(raw)
 end
 
+function M.is_spring_boot(fs)
+  local pom = fs:read("pom.xml")
+  if not pom then
+    return false
+  end
+  local parent = tag(pom, "parent")
+  if parent and tag(parent, "artifactId") == "spring-boot-starter-parent" then
+    return true
+  end
+  for dep in pom:gmatch("<dependency[^>]*>(.-)</dependency>") do
+    local artifact = tag(dep, "artifactId") or ""
+    if artifact == "spring-boot-dependencies" or artifact:find("^spring%-boot%-starter") then
+      return true
+    end
+  end
+  return false
+end
+
 function M.classify(fs)
   if is_gradle(fs) then
     return {

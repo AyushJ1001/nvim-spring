@@ -71,6 +71,14 @@ function M:list_source_paths()
   return unwrap_source_paths(resp.result)
 end
 
+function M:compile(kind)
+  local ok, jdtls = pcall(require, "jdtls")
+  if not ok or not jdtls.compile then
+    return
+  end
+  pcall(jdtls.compile, kind or "incremental")
+end
+
 function M:refresh()
   local ok, jdtls = pcall(require, "jdtls")
   if not ok then

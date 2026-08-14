@@ -56,6 +56,11 @@ function M:list(path)
   return names
 end
 
+function M:mkdir(path)
+  path = resolve(self, path)
+  vim.fn.mkdir(path, "p")
+end
+
 function M:write(path, content)
   path = resolve(self, path)
   local dir = path:match("(.+)/[^/]+$")
