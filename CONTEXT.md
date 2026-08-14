@@ -39,3 +39,7 @@ _Avoid_: file tree, project explorer (when meaning the Java-organized view)
 **Spring Boot project**:
 A Java project that uses Spring Boot.
 _Avoid_: Spring project (when Boot-specific behaviour is meant)
+
+**Initializr**:
+An HTTP service that creates a **Spring Boot project**. start.spring.io is one instance; the Plugin uses a single base URL.
+_Avoid_: initializer, generator, starter.io
