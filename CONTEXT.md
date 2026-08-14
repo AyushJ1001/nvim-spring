@@ -33,7 +33,7 @@ A Java namespace, usually a directory under a source root.
 _Avoid_: folder, directory, dependency (when meaning the Java namespace)
 
 **Scaffold**:
-A new Java type or Spring stereotype created with the correct package, filename, and boilerplate.
+A new Java type or Spring stereotype created with the correct package, filename, and boilerplate. Its **Package** is the **Package view** or buffer selection, or a nest under that selection, including a **Package** that does not yet exist.
 _Avoid_: snippet, template, generate (when meaning this product action)
 
 **Package view**:
