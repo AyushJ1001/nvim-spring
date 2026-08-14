@@ -63,6 +63,10 @@ end
 
 function M:write(path, content)
   path = resolve(self, path)
+  local dir = path:match("(.+)/[^/]+$")
+  if dir then
+    vim.fn.mkdir(dir, "p")
+  end
   local f, err = io.open(path, "w")
   if not f then
     error(err)

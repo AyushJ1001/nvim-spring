@@ -13,6 +13,24 @@ local IN_CONTRACT_POM = [[
 </project>
 ]]
 
+local JAVA_ONLY_POM = [[
+<project>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+</project>
+]]
+
+local function wizard_kind_names(spec)
+  local names = {}
+  local step = spec and spec.steps and spec.steps[1]
+  local field = step and step.fields and step.fields[1]
+  for _, value in ipairs((field and field.values) or {}) do
+    names[#names + 1] = value.name or value.id
+  end
+  return table.concat(names, ",")
+end
+
 -- Actions that need a workspace Build tool (not Initializr).
 local EXISTING_PROJECT_ACTIONS = {
   "create",
@@ -1272,6 +1290,115 @@ return {
       plugin:run()
       assert_eq(#adapters.host.starts, 1)
       assert_contains(fakes.notify_text(adapters.ui), "already running")
+    end,
+  },
+  {
+    "Java-only project offers Class Interface Record Enum and writes a Class from the buffer Package",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = {
+          ["pom.xml"] = JAVA_ONLY_POM,
+          ["src/main/java/com/example/App.java"] = "package com.example;\npublic class App {}\n",
+        },
+        ui = fakes.ui({
+          file = "/workspace/src/main/java/com/example/App.java",
+          wizard_answers = { kind = "Class", package = "com.example", name = "Hello" },
+        }),
+      })
+      plugin:create()
+      assert_eq(#adapters.ui.wizards, 1)
+      assert_eq(adapters.ui.wizards[1].steps[1].title, "Kind")
+      assert_eq(adapters.ui.wizards[1].steps[2].title, "Package")
+      assert_eq(adapters.ui.wizards[1].steps[3].title, "Type name")
+      assert_eq(wizard_kind_names(adapters.ui.wizards[1]), "Class,Interface,Record,Enum")
+      local written = adapters.fs:read("src/main/java/com/example/Hello.java")
+      assert_contains(written, "package com.example;")
+      assert_contains(written, "public class Hello {")
+      assert_not_contains(written, "@")
+      assert_eq(adapters.ui.opened, "src/main/java/com/example/Hello.java")
+    end,
+  },
+  {
+    "Spring Boot project offers stereotype kinds and writes RestController boilerplate",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = {
+          ["pom.xml"] = IN_CONTRACT_POM,
+          ["src/main/java/com/example/App.java"] = "package com.example;\npublic class App {}\n",
+        },
+        ui = fakes.ui({
+          file = "/workspace/src/main/java/com/example/App.java",
+          wizard_answers = {
+            kind = "RestController",
+            package = "com.example",
+            name = "HomeController",
+          },
+        }),
+      })
+      plugin:create()
+      assert_eq(
+        wizard_kind_names(adapters.ui.wizards[1]),
+        "Class,Interface,Record,Enum,RestController,Controller,Service,Repository,Component,Configuration"
+      )
+      local written = adapters.fs:read("src/main/java/com/example/HomeController.java")
+      assert_contains(written, "package com.example;")
+      assert_contains(written, "import org.springframework.web.bind.annotation.RestController;")
+      assert_contains(written, "@RestController")
+      assert_contains(written, "public class HomeController {")
+      assert_eq(adapters.ui.opened, "src/main/java/com/example/HomeController.java")
+    end,
+  },
+  {
+    "selected Package stays on the Package view node",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = {
+          ["pom.xml"] = JAVA_ONLY_POM,
+          ["src/main/java/com/example/App.java"] = "package com.example;\npublic class App {}\n",
+          ["src/main/java/com/example/web/Home.java"] = "package com.example.web;\npublic class Home {}\n",
+        },
+        ui = fakes.ui({
+          file = "/workspace/src/main/java/com/example/web/Home.java",
+          selection = { root = "src/main/java", package = "com.example" },
+          wizard_answers = { kind = "Interface", package = "com.example", name = "Named" },
+        }),
+      })
+      plugin:create()
+      local pkg_field = adapters.ui.wizards[1].steps[2].fields[1]
+      assert_eq(pkg_field.default, "com.example")
+      local offered = {}
+      for _, value in ipairs(pkg_field.values) do
+        offered[#offered + 1] = value.id
+      end
+      assert_eq(table.concat(offered, ","), "com.example,com.example.web")
+      local written = adapters.fs:read("src/main/java/com/example/Named.java")
+      assert_contains(written, "package com.example;")
+      assert_contains(written, "public interface Named {")
+      assert_eq(adapters.fs:read("src/main/java/com/example/web/Named.java"), nil)
+    end,
+  },
+  {
+    "new-nest Package that does not exist yet is created under the selection",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = {
+          ["pom.xml"] = JAVA_ONLY_POM,
+          ["src/main/java/com/example/App.java"] = "package com.example;\npublic class App {}\n",
+        },
+        ui = fakes.ui({
+          selection = { root = "src/main/java", package = "com.example" },
+          wizard_answers = {
+            kind = "Record",
+            package = "web.internal",
+            name = "Payment",
+          },
+        }),
+      })
+      plugin:create()
+      local written = adapters.fs:read("src/main/java/com/example/web/internal/Payment.java")
+      assert_contains(written, "package com.example.web.internal;")
+      assert_contains(written, "public record Payment() {")
+      assert_eq(adapters.ui.opened, "src/main/java/com/example/web/internal/Payment.java")
     end,
   },
 }

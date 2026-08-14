@@ -1,6 +1,7 @@
 local workspace = require("nvim-spring.workspace")
 local package_view = require("nvim-spring.package_view")
 local dependency = require("nvim-spring.dependency")
+local scaffold = require("nvim-spring.scaffold")
 
 local Actions = {}
 Actions.__index = Actions
@@ -132,8 +133,75 @@ function Actions:_gate()
   return true
 end
 
+function Actions:_run_wizard(spec, on_done)
+  if not self.ui or not self.ui.wizard then
+    on_done(nil)
+    return
+  end
+  local done = false
+  local function finish(answers)
+    if done then
+      return
+    end
+    done = true
+    on_done(answers)
+  end
+  local ret = self.ui:wizard(spec, finish)
+  if ret ~= nil then
+    if ret == false then
+      finish(nil)
+    else
+      finish(ret)
+    end
+  end
+end
+
 function Actions:create()
-  self:_gate()
+  if not self:_gate() then
+    return
+  end
+  local ctx = scaffold.context(self.fs, self.jdtls, self.ui)
+  local spec = scaffold.wizard_spec(self.fs, self.jdtls, ctx)
+  spec.preview = function(answers)
+    local kind = scaffold.kind_by_id(self.fs, answers.kind)
+    if not kind then
+      return ""
+    end
+    local pkg = scaffold.resolve_package(ctx.package, answers.package)
+    local name = answers.name
+    if not name or name == "" then
+      name = "Type"
+    end
+    return scaffold.render(kind, pkg, name)
+  end
+  self:_run_wizard(spec, function(answers)
+    if not answers then
+      return
+    end
+    local kind = scaffold.kind_by_id(self.fs, answers.kind)
+    local name = answers.name and answers.name:match("^%s*(.-)%s*$") or ""
+    if not kind then
+      return
+    end
+    if name == "" then
+      self.ui:notify("Type name is required.")
+      return
+    end
+    if not name:match("^[A-Za-z_][A-Za-z0-9_]*$") then
+      self.ui:notify("Type name is not a valid Java identifier.")
+      return
+    end
+    local pkg = scaffold.resolve_package(ctx.package, answers.package)
+    local path = scaffold.path(ctx.root, pkg, name)
+    if self.fs.exists and self.fs:exists(path) then
+      self.ui:notify(name .. " already exists.")
+      return
+    end
+    self.fs:write(path, scaffold.render(kind, pkg, name))
+    if self.ui.open_file then
+      self.ui:open_file(path)
+    end
+  end)
 end
 
 function Actions:packages()
