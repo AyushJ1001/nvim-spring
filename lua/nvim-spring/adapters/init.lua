@@ -6,6 +6,7 @@ function M.production()
     ui = require("nvim-spring.adapters.ui"),
     jdtls = require("nvim-spring.adapters.jdtls"),
     central = require("nvim-spring.adapters.central"),
+    host = require("nvim-spring.adapters.host"),
   }
 end
 

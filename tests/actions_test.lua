@@ -939,4 +939,339 @@ return {
       assert_not_contains(deps, "<version>")
     end,
   },
+  {
+    "missing Maven loud-refuses run and starts no process",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        host = fakes.host({ bins = {} }),
+      })
+      plugin:run()
+      assert_contains(fakes.notify_text(adapters.ui), "Neither mvnw nor mvn is available")
+      assert_eq(#adapters.host.starts, 0)
+      assert_eq(#adapters.fs.writes, 0)
+    end,
+  },
+  {
+    "run prefers ./mvnw spring-boot:run when the wrapper exists",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = {
+          ["pom.xml"] = IN_CONTRACT_POM,
+          ["mvnw"] = "#!/bin/sh\n",
+        },
+        host = fakes.host({ bins = { mvn = true } }),
+      })
+      plugin:run()
+      assert_eq(#adapters.host.starts, 1)
+      local started = adapters.host.starts[1]
+      assert_eq(started.argv[1], "./mvnw")
+      assert_eq(started.argv[2], "spring-boot:run")
+      assert_eq(#started.argv, 2)
+    end,
+  },
+  {
+    "run uses mvn spring-boot:run when there is no wrapper",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        host = fakes.host({ bins = { mvn = true } }),
+      })
+      plugin:run()
+      assert_eq(#adapters.host.starts, 1)
+      local started = adapters.host.starts[1]
+      assert_eq(started.argv[1], "mvn")
+      assert_eq(started.argv[2], "spring-boot:run")
+      assert_eq(#started.argv, 2)
+    end,
+  },
+  {
+    "missing DevTools still starts, says Reload will not happen, offers add-Dependency, and does not silent-edit the POM",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        host = fakes.host({ bins = { mvn = true } }),
+        ui = fakes.ui({ confirm = false }),
+      })
+      plugin:run()
+      assert_eq(#adapters.host.starts, 1)
+      assert_eq(adapters.host.starts[1].argv[2], "spring-boot:run")
+      assert_contains(fakes.notify_text(adapters.ui), "Reload will not happen")
+      assert_eq(adapters.ui.confirm_calls, 1)
+      assert_contains(adapters.ui.last_confirm, "spring-boot-devtools")
+      assert_eq(#adapters.fs.writes, 0)
+      assert_eq(adapters.fs:read("pom.xml"), IN_CONTRACT_POM)
+    end,
+  },
+  {
+    "accepting the DevTools offer writes through the add-Dependency path",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        host = fakes.host({ bins = { mvn = true } }),
+        ui = fakes.ui({ confirm = true }),
+        central = fakes.central({
+          docs = {
+            {
+              g = "org.springframework.boot",
+              a = "spring-boot-devtools",
+              latestVersion = "3.3.4",
+            },
+          },
+        }),
+      })
+      plugin:run()
+      assert_eq(#adapters.host.starts, 1)
+      local pom = adapters.fs:read("pom.xml")
+      assert_contains(pom, "<artifactId>spring-boot-devtools</artifactId>")
+      assert_eq(#adapters.fs.writes, 1)
+      assert_eq(adapters.jdtls.refreshes, 1)
+    end,
+  },
+  {
+    "accepting the DevTools offer from a test buffer does not write test scope",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        ui = fakes.ui({
+          confirm = true,
+          file = "/workspace/src/test/java/com/example/FooTest.java",
+        }),
+        central = fakes.central({
+          docs = {
+            {
+              g = "org.springframework.boot",
+              a = "spring-boot-devtools",
+              latestVersion = "3.3.4",
+            },
+          },
+        }),
+      })
+      plugin:run()
+      assert_contains(adapters.fs:read("pom.xml"), "<artifactId>spring-boot-devtools</artifactId>")
+      assert_not_contains(adapters.fs:read("pom.xml"), "<scope>test</scope>")
+    end,
+  },
+  {
+    "DevTools already on the classpath starts without an add-Dependency offer",
+    function()
+      local pom = [[
+<project>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.4</version>
+  </parent>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-devtools</artifactId>
+      <optional>true</optional>
+    </dependency>
+  </dependencies>
+</project>
+]]
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = pom },
+        host = fakes.host({ bins = { mvn = true } }),
+      })
+      plugin:run()
+      assert_eq(#adapters.host.starts, 1)
+      assert_eq(adapters.host.starts[1].argv[2], "spring-boot:run")
+      assert_not_contains(fakes.notify_text(adapters.ui), "Reload will not happen")
+      assert_eq(adapters.ui.confirm_calls, 0)
+      assert_eq(#adapters.fs.writes, 0)
+    end,
+  },
+  {
+    "test-scoped DevTools is treated as missing from the runtime classpath",
+    function()
+      local pom = [[
+<project>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.4</version>
+  </parent>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-devtools</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>
+]]
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = pom },
+        ui = fakes.ui({ confirm = false }),
+      })
+      plugin:run()
+      assert_eq(#adapters.host.starts, 1)
+      assert_contains(fakes.notify_text(adapters.ui), "Reload will not happen")
+      assert_eq(adapters.ui.confirm_calls, 1)
+      assert_eq(#adapters.fs.writes, 0)
+    end,
+  },
+  {
+    "stop does not kill a foreign spring-boot:run process",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        host = fakes.host({ bins = { mvn = true } }),
+      })
+      local foreign = {
+        id = 99,
+        argv = { "mvn", "spring-boot:run" },
+      }
+      adapters.host.running[99] = foreign
+      plugin:stop()
+      assert_eq(#adapters.host.stops, 0)
+      assert_true(adapters.host.running[99] ~= nil, "foreign process is left alone")
+    end,
+  },
+  {
+    "stop kills only the Plugin-started process",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        host = fakes.host({ bins = { mvn = true } }),
+      })
+      adapters.host.running[99] = {
+        id = 99,
+        argv = { "mvn", "spring-boot:run" },
+      }
+      plugin:run()
+      assert_eq(#adapters.host.starts, 1)
+      local owned = adapters.host.starts[1]
+      plugin:stop()
+      assert_eq(#adapters.host.stops, 1)
+      assert_eq(adapters.host.stops[1].id, owned.id)
+      assert_true(adapters.host.running[owned.id] == nil, "Plugin-started process is stopped")
+      assert_true(adapters.host.running[99] ~= nil, "foreign process is left alone")
+    end,
+  },
+  {
+    "saving a Java file asks jdtls for an incremental compile",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+      })
+      plugin:setup({})
+      adapters.ui:fire_write("src/main/java/com/example/App.java")
+      assert_eq(adapters.jdtls.compiles, 1)
+      assert_eq(adapters.jdtls.last_compile, "incremental")
+    end,
+  },
+  {
+    "saving application.yml copies it into Maven target/classes",
+    function()
+      local yml = "server:\n  port: 8080\n"
+      local plugin, adapters = fakes.plugin({
+        files = {
+          ["pom.xml"] = IN_CONTRACT_POM,
+          ["src/main/resources/application.yml"] = yml,
+        },
+      })
+      plugin:setup({})
+      adapters.ui:fire_write("src/main/resources/application.yml")
+      assert_eq(adapters.fs:read("target/classes/application.yml"), yml)
+      assert_eq(adapters.jdtls.last_compile, "incremental")
+    end,
+  },
+  {
+    "saving templates and static resources copies them into target/classes",
+    function()
+      local html = "<html></html>\n"
+      local css = "body{}\n"
+      local plugin, adapters = fakes.plugin({
+        files = {
+          ["pom.xml"] = IN_CONTRACT_POM,
+          ["src/main/resources/templates/index.html"] = html,
+          ["src/main/resources/static/app.css"] = css,
+        },
+      })
+      plugin:setup({})
+      adapters.ui:fire_write("/workspace/src/main/resources/templates/index.html")
+      adapters.ui:fire_write("/workspace/src/main/resources/static/app.css")
+      assert_eq(adapters.fs:read("target/classes/templates/index.html"), html)
+      assert_eq(adapters.fs:read("target/classes/static/app.css"), css)
+    end,
+  },
+  {
+    "compile-on-save does not run on a non-Boot Maven project",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = {
+          ["pom.xml"] = [[
+<project>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+</project>
+]],
+          ["src/main/resources/application.yml"] = "x: 1\n",
+        },
+      })
+      plugin:setup({})
+      adapters.ui:fire_write("src/main/java/com/example/App.java")
+      adapters.ui:fire_write("src/main/resources/application.yml")
+      assert_eq(adapters.jdtls.compiles, 0)
+      assert_eq(adapters.fs:read("target/classes/application.yml"), nil)
+    end,
+  },
+  {
+    "compile-on-save does not write or notify on a Gradle root",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = {
+          ["build.gradle"] = "plugins { id 'java' }\n",
+          ["src/main/resources/application.yml"] = "x: 1\n",
+        },
+      })
+      plugin:setup({})
+      adapters.ui:fire_write("src/main/java/com/example/App.java")
+      adapters.ui:fire_write("src/main/resources/application.yml")
+      assert_eq(adapters.jdtls.compiles, 0)
+      assert_eq(adapters.fs:read("target/classes/application.yml"), nil)
+      assert_not_contains(fakes.notify_text(adapters.ui), "not implemented yet")
+    end,
+  },
+  {
+    "run loud-refuses a non-Boot Maven project and starts no process",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = {
+          ["pom.xml"] = [[
+<project>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+</project>
+]],
+        },
+      })
+      plugin:run()
+      assert_contains(fakes.notify_text(adapters.ui), "Not a Spring Boot project")
+      assert_eq(#adapters.host.starts, 0)
+    end,
+  },
+  {
+    "a second run does not start another process",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+      })
+      plugin:run()
+      plugin:run()
+      assert_eq(#adapters.host.starts, 1)
+      assert_contains(fakes.notify_text(adapters.ui), "already running")
+    end,
+  },
 }

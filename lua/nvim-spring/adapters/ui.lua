@@ -103,4 +103,21 @@ function M:current_file()
   return vim.api.nvim_buf_get_name(0)
 end
 
+function M:confirm(message)
+  local ok, result = pcall(vim.fn.confirm, message, "&Yes\n&No", 2)
+  if not ok then
+    return false
+  end
+  return result == 1
+end
+
+function M:on_write(cb)
+  vim.api.nvim_create_autocmd("BufWritePost", {
+    group = vim.api.nvim_create_augroup("nvim_spring_compile_on_save", { clear = true }),
+    callback = function(ev)
+      cb(ev.file ~= "" and ev.file or ev.match)
+    end,
+  })
+end
+
 return M
