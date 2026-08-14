@@ -33,8 +33,12 @@ A new Java type or Spring stereotype created with the correct package, filename,
 _Avoid_: snippet, template, generate (when meaning this product action)
 
 **Package view**:
-A project explorer organized by source roots and Java packages, not raw filesystem paths.
-_Avoid_: file tree, project explorer (when meaning the Java-organized view)
+A separate, on-demand explorer organized by source roots and Java packages, not raw filesystem paths. It coexists with the file explorer; it is not a mode of it.
+_Avoid_: file tree, project explorer (when meaning the Java-organized view), java file explorer
+
+**Wizard**:
+A multi-step, on-demand, floating flow that collects a decision before an action — creating a **Scaffold**, or driving Initializr. Not an always-on window.
+_Avoid_: form, dialog, modal (when meaning this product surface)
 
 **Spring Boot project**:
 A Java project that uses Spring Boot.
