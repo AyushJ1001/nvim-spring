@@ -91,6 +91,45 @@ function M:refresh()
   end
 end
 
+local function utf8_step(s, i)
+  local b = s:byte(i)
+  if not b then
+    return nil
+  end
+  local nbytes, units
+  if b < 0x80 then
+    nbytes, units = 1, 1
+  elseif b < 0xE0 then
+    nbytes, units = 2, 1
+  elseif b < 0xF0 then
+    nbytes, units = 3, 1
+  else
+    nbytes, units = 4, 2
+  end
+  if i + nbytes - 1 > #s then
+    return 1, 1
+  end
+  return nbytes, units
+end
+
+-- vim.diagnostic columns are 0-based bytes; the action module uses UTF-16.
+local function byte_to_utf16(s, byte_off)
+  if not s or byte_off <= 0 then
+    return 0
+  end
+  local i, units = 1, 0
+  local limit = byte_off + 1
+  while i < limit and i <= #s do
+    local nbytes, u16 = utf8_step(s, i)
+    if not nbytes then
+      break
+    end
+    units = units + u16
+    i = i + nbytes
+  end
+  return units
+end
+
 function M:diagnostics(path)
   if not vim.diagnostic or not vim.diagnostic.get then
     return {}
@@ -102,7 +141,25 @@ function M:diagnostics(path)
       return {}
     end
   end
-  return vim.diagnostic.get(bufnr)
+  local diags = vim.diagnostic.get(bufnr)
+  if not vim.api or not vim.api.nvim_buf_get_lines then
+    return diags
+  end
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local out = {}
+  for _, d in ipairs(diags) do
+    local line = lines[(d.lnum or 0) + 1] or ""
+    local copy = {}
+    for k, v in pairs(d) do
+      copy[k] = v
+    end
+    copy.col = byte_to_utf16(line, d.col or 0)
+    if d.end_col then
+      copy.end_col = byte_to_utf16(line, d.end_col)
+    end
+    out[#out + 1] = copy
+  end
+  return out
 end
 
 return M

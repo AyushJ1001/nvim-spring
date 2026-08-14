@@ -1250,6 +1250,43 @@ public class App {
     end,
   },
   {
+    "type-local action with a non-ASCII prefix uses UTF-16 columns",
+    function()
+      local java = [[
+package com.example;
+
+public class App {
+  String café = com.google.common.collect.ImmutableList.of();
+}
+]]
+      local plugin, adapters = type_local_plugin({
+        java = java,
+        diagnostics = {
+          {
+            file = JAVA_PATH,
+            code = 16777218,
+            lnum = 3,
+            col = 16,
+            end_lnum = 3,
+            end_col = 55,
+          },
+        },
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      local offered = plugin:code_actions()
+      assert_eq(offered[1].query, "com.google.common.collect.ImmutableList")
+      plugin:apply_code_action(offered[1])
+      local after = adapters.fs:read("src/main/java/com/example/App.java")
+      assert_contains(after, "import com.google.common.collect.ImmutableList;")
+      assert_contains(after, "String café = ImmutableList.of();")
+      assert_not_contains(after, "String café = com.google.common.collect.ImmutableList.of();")
+    end,
+  },
+  {
     "type-local Solr failure writes neither POM nor Java buffer",
     function()
       local plugin, adapters = type_local_plugin({

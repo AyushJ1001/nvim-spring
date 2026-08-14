@@ -14,6 +14,45 @@ local function diagnostic_code(diag)
   return tostring(diag.code)
 end
 
+-- LSP / jdtls columns are UTF-16 code units. Lua string.sub is bytes.
+local function utf8_step(s, i)
+  local b = s:byte(i)
+  if not b then
+    return nil
+  end
+  local nbytes, units
+  if b < 0x80 then
+    nbytes, units = 1, 1
+  elseif b < 0xE0 then
+    nbytes, units = 2, 1
+  elseif b < 0xF0 then
+    nbytes, units = 3, 1
+  else
+    nbytes, units = 4, 2
+  end
+  if i + nbytes - 1 > #s then
+    return 1, 1
+  end
+  return nbytes, units
+end
+
+-- 0-based UTF-16 offset → 1-based Lua byte index (or #s+1 past the end).
+local function utf16_to_byte(s, utf16_off)
+  if not s or utf16_off <= 0 then
+    return 1
+  end
+  local i, units = 1, 0
+  while i <= #s and units < utf16_off do
+    local nbytes, u16 = utf8_step(s, i)
+    if not nbytes then
+      break
+    end
+    units = units + u16
+    i = i + nbytes
+  end
+  return i
+end
+
 local function split_lines(source)
   local lines = {}
   local pos = 1
@@ -38,9 +77,9 @@ local function range_text(source, diag)
   if not line then
     return ""
   end
-  local col = diag.col or 0
-  local end_col = diag.end_col or #line
-  return line:sub(col + 1, end_col)
+  local start_b = utf16_to_byte(line, diag.col or 0)
+  local end_b = diag.end_col and utf16_to_byte(line, diag.end_col) or (#line + 1)
+  return line:sub(start_b, end_b - 1)
 end
 
 local function simple_name(type_text)
@@ -323,9 +362,9 @@ local function replace_range_with_simple(source, range, fqcn)
     return source
   end
   local name = simple_name(fqcn)
-  local col = range.col or 0
-  local end_col = range.end_col or #line
-  lines[i] = line:sub(1, col) .. name .. line:sub(end_col + 1)
+  local start_b = utf16_to_byte(line, range.col or 0)
+  local end_b = range.end_col and utf16_to_byte(line, range.end_col) or (#line + 1)
+  lines[i] = line:sub(1, start_b - 1) .. name .. line:sub(end_b)
   return table.concat(lines, "\n")
 end
 
