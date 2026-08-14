@@ -28,4 +28,28 @@ function M:stop(handle)
   end
 end
 
+local function host_jdk_output()
+  if vim.fn.executable("java") ~= 1 then
+    return nil
+  end
+  if vim.system then
+    local result = vim.system({ "java", "-version" }, { text = true }):wait()
+    return ((result.stderr or "") .. "\n" .. (result.stdout or ""))
+  end
+  return vim.fn.system("java -version 2>&1")
+end
+
+function M:jdk_major()
+  local text = host_jdk_output()
+  if not text then
+    return nil
+  end
+  local quoted = text:match('version%s+"([^"]+)"')
+  if not quoted then
+    return nil
+  end
+  return require("nvim-spring.initializr").parse_language_level(quoted)
+end
+
 return M
+

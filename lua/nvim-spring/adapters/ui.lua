@@ -155,4 +155,16 @@ function M:on_write(cb)
   })
 end
 
+function M:open_project(path)
+  vim.cmd.cd(vim.fn.fnameescape(path))
+  local pom = path .. "/pom.xml"
+  local stat = (vim.uv and vim.uv.fs_stat(pom)) or (vim.loop and vim.loop.fs_stat(pom))
+  if stat then
+    vim.cmd.edit(vim.fn.fnameescape(pom))
+  else
+    vim.cmd.edit(vim.fn.fnameescape(path))
+  end
+end
+
 return M
+

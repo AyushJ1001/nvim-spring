@@ -1,4 +1,5 @@
 -- Preview-led Wizard. Narrow columns drop the preview.
+-- One field per step (Scaffold) or several fields (Initializr Identity / Platform).
 
 local M = {}
 
@@ -38,10 +39,22 @@ local function field_type(field)
   return "text"
 end
 
+local function selected_ids(value)
+  local set = {}
+  if type(value) ~= "table" then
+    return set
+  end
+  for _, item in ipairs(value) do
+    set[field_id(item) or item] = true
+  end
+  return set
+end
+
 function M.run(spec, on_done)
   spec = spec or {}
   local answers = copy_defaults(spec)
   local step_i = 1
+  local field_i = 1
   local cursor = 1
   local filter = ""
   local drop_preview = vim.o.columns < NARROW_COLUMNS
@@ -105,7 +118,10 @@ function M.run(spec, on_done)
 
   local function current_field()
     local current = step()
-    return current and current.fields and current.fields[1]
+    if not current or not current.fields then
+      return nil
+    end
+    return current.fields[field_i] or current.fields[1]
   end
 
   local function listed_values(field)
@@ -143,11 +159,37 @@ function M.run(spec, on_done)
     return values
   end
 
+  local function select_cursor()
+    local field = current_field()
+    if not field or field_type(field) ~= "select" then
+      return
+    end
+    local values = listed_values(field)
+    local value = values[cursor]
+    if value then
+      answers[field.name] = field_id(value)
+    end
+  end
+
+  local function sync_cursor_to_answer()
+    local field = current_field()
+    if not field or field_type(field) ~= "select" then
+      return
+    end
+    for i, value in ipairs(listed_values(field)) do
+      if field_id(value) == answers[field.name] then
+        cursor = i
+        return
+      end
+    end
+  end
+
   local function render()
     if not vim.api.nvim_buf_is_valid(buf) then
       return
     end
     local current = step()
+    sync_cursor_to_answer()
     local field = current_field()
     local lines = {}
     local meta = (spec.source or "") .. " · step " .. step_i .. "/" .. #spec.steps
@@ -173,7 +215,39 @@ function M.run(spec, on_done)
     end
 
     local body = {}
-    if field and field_type(field) == "select" then
+    local focus_body
+    local fields = (current and current.fields) or {}
+    local multi_field = #fields > 1
+
+    if multi_field then
+      for fi, f in ipairs(fields) do
+        local active = fi == field_i
+        local ftype = field_type(f)
+        body[#body + 1] = (active and ">" or " ") .. " " .. (f.label or f.name)
+        if active then
+          focus_body = #body
+        end
+        if ftype == "text" then
+          body[#body + 1] = "  " .. tostring(answers[f.name] or "")
+        else
+          for vi, value in ipairs(f.values or {}) do
+            local id = field_id(value)
+            local mark = answers[f.name] == id and "*" or " "
+            if ftype == "multi" then
+              mark = selected_ids(answers[f.name])[id] and "x" or " "
+            end
+            local caret = active and answers[f.name] == id
+            if ftype == "multi" then
+              caret = active and vi == cursor
+            end
+            body[#body + 1] = (caret and "> " or "  ") .. mark .. " " .. field_label(value)
+            if caret then
+              focus_body = #body
+            end
+          end
+        end
+      end
+    elseif field and field_type(field) == "select" then
       body[#body + 1] = "filter: " .. filter
       local values = listed_values(field)
       if cursor > #values then
@@ -185,12 +259,36 @@ function M.run(spec, on_done)
         local prefix = i == cursor and "> " or "  "
         local desc = value.description and ("  " .. value.description) or ""
         body[#body + 1] = prefix .. mark .. " " .. field_label(value) .. desc
+        if i == cursor then
+          focus_body = #body
+        end
+      end
+      if #values == 0 then
+        body[#body + 1] = "  (no matches)"
+      end
+    elseif field and field_type(field) == "multi" then
+      body[#body + 1] = "filter: " .. (filter ~= "" and filter or "")
+      local values = listed_values(field)
+      if cursor > #values then
+        cursor = math.max(1, #values)
+      end
+      local picked = selected_ids(answers[field.name])
+      for i, value in ipairs(values) do
+        local id = field_id(value)
+        local mark = picked[id] and "x" or " "
+        local prefix = i == cursor and "> " or "  "
+        local desc = value.description and ("  " .. value.description) or ""
+        body[#body + 1] = prefix .. "[" .. mark .. "] " .. field_label(value) .. desc
+        if i == cursor then
+          focus_body = #body
+        end
       end
       if #values == 0 then
         body[#body + 1] = "  (no matches)"
       end
     elseif field then
       body[#body + 1] = "> " .. (current.title or field.label or field.name)
+      focus_body = #body
       body[#body + 1] = "  " .. tostring(answers[field.name] or "")
     end
 
@@ -214,23 +312,18 @@ function M.run(spec, on_done)
 
     lines[#lines + 1] = ""
     local last = step_i == #spec.steps
-    lines[#lines + 1] = last and "enter create   e edit   esc back   q quit"
+    local finish_word = spec.finish or "create"
+    lines[#lines + 1] = last and ("enter " .. finish_word .. "   e edit   esc back   q quit")
       or "enter next   / filter   esc back   q quit"
 
     vim.bo[buf].modifiable = true
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
     vim.bo[buf].modifiable = false
-  end
 
-  local function select_cursor()
-    local field = current_field()
-    if not field or field_type(field) ~= "select" then
-      return
-    end
-    local values = listed_values(field)
-    local value = values[cursor]
-    if value then
-      answers[field.name] = field_id(value)
+    if focus_body and vim.api.nvim_win_is_valid(win) then
+      local prefix = (drop_preview or #preview_lines == 0) and 3 or 4
+      local focus_line = math.max(1, math.min(#lines, prefix + focus_body))
+      pcall(vim.api.nvim_win_set_cursor, win, { focus_line, 0 })
     end
   end
 
@@ -240,8 +333,9 @@ function M.run(spec, on_done)
       return
     end
     if field_type(field) == "text" then
-      local value = vim.fn.input((step().title or field.name) .. ": ", tostring(answers[field.name] or ""))
-      if value ~= nil then
+      local current = tostring(answers[field.name] or "")
+      local ok, value = pcall(vim.fn.input, (step().title or field.label or field.name) .. ": ", current)
+      if ok and value ~= nil and value ~= "" then
         answers[field.name] = value
       end
     else
@@ -255,17 +349,20 @@ function M.run(spec, on_done)
     select_cursor()
     if step_i < #spec.steps then
       step_i = step_i + 1
+      field_i = 1
       cursor = 1
       filter = ""
       render()
-      local field = current_field()
-      if field and field_type(field) == "text" then
+      local fields = step().fields or {}
+      local field = fields[1]
+      if #fields == 1 and field and field_type(field) == "text" then
         edit_text()
       end
       return
     end
-    local field = current_field()
-    if field and field_type(field) == "text" then
+    local fields = step().fields or {}
+    local field = fields[1]
+    if #fields == 1 and field and field_type(field) == "text" then
       local value = answers[field.name]
       if not value or value == "" then
         edit_text()
@@ -281,6 +378,7 @@ function M.run(spec, on_done)
   local function prev_step()
     if step_i > 1 then
       step_i = step_i - 1
+      field_i = 1
       cursor = 1
       filter = ""
       render()
@@ -303,17 +401,55 @@ function M.run(spec, on_done)
   map("/", edit_text)
   map("j", function()
     local field = current_field()
-    local max = 1
-    if field and field_type(field) == "select" then
-      max = math.max(1, #listed_values(field))
+    local ftype = field and field_type(field)
+    local fields = step().fields or {}
+    if #fields > 1 and ftype == "text" then
+      field_i = math.min(#fields, field_i + 1)
+    elseif ftype == "select" or ftype == "multi" then
+      local max = math.max(1, #listed_values(field))
+      cursor = math.min(max, cursor + 1)
+      select_cursor()
     end
-    cursor = math.min(max, cursor + 1)
-    select_cursor()
     render()
   end)
   map("k", function()
-    cursor = math.max(1, cursor - 1)
-    select_cursor()
+    local field = current_field()
+    local ftype = field and field_type(field)
+    local fields = step().fields or {}
+    if #fields > 1 and ftype == "text" then
+      field_i = math.max(1, field_i - 1)
+    else
+      cursor = math.max(1, cursor - 1)
+      select_cursor()
+    end
+    render()
+  end)
+  map("h", function()
+    local fields = step().fields or {}
+    if #fields > 1 then
+      field_i = math.max(1, field_i - 1)
+      sync_cursor_to_answer()
+      render()
+    end
+  end)
+  map("l", function()
+    local fields = step().fields or {}
+    if #fields > 1 then
+      field_i = math.min(#fields, field_i + 1)
+      sync_cursor_to_answer()
+      render()
+    end
+  end)
+  map("<Tab>", function()
+    local fields = step().fields or {}
+    if #fields == 0 then
+      return
+    end
+    field_i = field_i + 1
+    if field_i > #fields then
+      field_i = 1
+    end
+    sync_cursor_to_answer()
     render()
   end)
   map("<Down>", function()
@@ -321,6 +457,38 @@ function M.run(spec, on_done)
   end)
   map("<Up>", function()
     vim.api.nvim_feedkeys("k", "m", false)
+  end)
+  map("<Left>", function()
+    vim.api.nvim_feedkeys("h", "m", false)
+  end)
+  map("<Right>", function()
+    vim.api.nvim_feedkeys("l", "m", false)
+  end)
+  map("<Space>", function()
+    local field = current_field()
+    if not field or field_type(field) ~= "multi" then
+      return
+    end
+    local values = listed_values(field)
+    local value = values[cursor]
+    if not value then
+      return
+    end
+    local id = field_id(value)
+    local next_vals = {}
+    local found = false
+    for _, item in ipairs(answers[field.name] or {}) do
+      if field_id(item) == id or item == id then
+        found = true
+      else
+        next_vals[#next_vals + 1] = item
+      end
+    end
+    if not found then
+      next_vals[#next_vals + 1] = id
+    end
+    answers[field.name] = next_vals
+    render()
   end)
 
   vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {

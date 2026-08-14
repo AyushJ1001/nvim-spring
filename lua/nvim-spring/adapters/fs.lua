@@ -1,10 +1,12 @@
+local pathutil = require("nvim-spring.path")
+
 local M = {}
 
 local function resolve(self, path)
-  if path:sub(1, 1) == "/" then
+  if pathutil.is_absolute(path) then
     return path
   end
-  return self:cwd() .. "/" .. path
+  return pathutil.join(self:cwd(), path)
 end
 
 function M:cwd()
@@ -75,4 +77,47 @@ function M:write(path, content)
   f:close()
 end
 
+local function run(args)
+  if vim.system then
+    local result = vim.system(args, { text = true }):wait()
+    return result.code == 0
+  end
+  local cmd = {}
+  for _, arg in ipairs(args) do
+    cmd[#cmd + 1] = vim.fn.shellescape(arg)
+  end
+  vim.fn.system(table.concat(cmd, " "))
+  return vim.v.shell_error == 0
+end
+
+function M:extract_zip(archive, dest)
+  dest = resolve(self, dest)
+  local tmp = vim.fn.tempname() .. ".zip"
+  local staging = vim.fn.tempname()
+  local f, err = io.open(tmp, "wb")
+  if not f then
+    return false, err
+  end
+  f:write(archive)
+  f:close()
+
+  local ok = false
+  if vim.fn.executable("unzip") == 1 then
+    ok = run({ "unzip", "-o", "-q", tmp, "-d", staging })
+  elseif vim.fn.executable("python3") == 1 then
+    ok = run({ "python3", "-m", "zipfile", "-e", tmp, staging })
+  end
+  os.remove(tmp)
+  if not ok then
+    pcall(vim.fn.delete, staging, "rf")
+    return false
+  end
+  if vim.fn.rename(staging, dest) ~= 0 then
+    pcall(vim.fn.delete, staging, "rf")
+    return false
+  end
+  return true
+end
+
 return M
+
