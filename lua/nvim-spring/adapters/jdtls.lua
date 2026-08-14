@@ -71,4 +71,16 @@ function M:list_source_paths()
   return unwrap_source_paths(resp.result)
 end
 
+function M:refresh()
+  local ok, jdtls = pcall(require, "jdtls")
+  if not ok then
+    return
+  end
+  if jdtls.update_projects_config then
+    pcall(jdtls.update_projects_config, { select_mode = "all" })
+  elseif jdtls.update_project_config then
+    pcall(jdtls.update_project_config)
+  end
+end
+
 return M

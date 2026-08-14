@@ -1,5 +1,18 @@
 local fakes = require("support.fakes")
 
+local IN_CONTRACT_POM = [[
+<project>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.4</version>
+  </parent>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+</project>
+]]
+
 -- Actions that need a workspace Build tool (not Initializr).
 local EXISTING_PROJECT_ACTIONS = {
   "create",
@@ -458,6 +471,472 @@ return {
       plugin:packages()
       assert_eq(#adapters.ui.package_views, 0)
       assert_contains(fakes.notify_text(adapters.ui), "not implemented yet")
+    end,
+  },
+  {
+    "unique exact GAV applies without a picker and writes an unmanaged version",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:add_dependency("com.google.guava:guava")
+      local pom = adapters.fs:read("pom.xml")
+      assert_contains(pom, "<groupId>com.google.guava</groupId>")
+      assert_contains(pom, "<artifactId>guava</artifactId>")
+      assert_contains(pom, "<version>33.2.1-jre</version>")
+      assert_eq(adapters.ui.pick_calls, 0)
+      assert_eq(adapters.jdtls.refreshes, 1)
+    end,
+  },
+  {
+    "unique exact GAV with version applies without a picker",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", v = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:add_dependency("com.google.guava:guava:33.2.1-jre")
+      assert_eq(adapters.ui.pick_calls, 0)
+      assert_contains(adapters.fs:read("pom.xml"), "<version>33.2.1-jre</version>")
+    end,
+  },
+  {
+    "unique FQCN hit applies without a picker",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", v = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:add_dependency("com.google.common.collect.ImmutableList")
+      assert_eq(adapters.ui.pick_calls, 0)
+      assert_contains(adapters.fs:read("pom.xml"), "<artifactId>guava</artifactId>")
+      assert_eq(adapters.jdtls.refreshes, 1)
+    end,
+  },
+  {
+    "simple-name search always goes through a picker",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        ui = fakes.ui({ pick_choice = 1 }),
+        central = fakes.central({
+          docs = {
+            { g = "org.slf4j", a = "slf4j-api", latestVersion = "2.0.16" },
+          },
+        }),
+      })
+      plugin:add_dependency("Logger")
+      assert_eq(adapters.ui.pick_calls, 1)
+      assert_contains(adapters.fs:read("pom.xml"), "<artifactId>slf4j-api</artifactId>")
+    end,
+  },
+  {
+    "keyword search always goes through a picker",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        ui = fakes.ui({ pick_choice = 1 }),
+        central = fakes.central({
+          docs = {
+            { g = "com.fasterxml.jackson.core", a = "jackson-databind", latestVersion = "2.17.2" },
+          },
+        }),
+      })
+      plugin:add_dependency("jackson")
+      assert_eq(adapters.ui.pick_calls, 1)
+      assert_contains(adapters.fs:read("pom.xml"), "<artifactId>jackson-databind</artifactId>")
+    end,
+  },
+  {
+    "BOM-managed GAV omits version",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        central = fakes.central({
+          docs = {
+            {
+              g = "org.springframework.boot",
+              a = "spring-boot-starter-web",
+              latestVersion = "3.3.4",
+            },
+          },
+          poms = {
+            ["org.springframework.boot:spring-boot-starter-parent:3.3.4"] = [[
+<project>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-dependencies</artifactId>
+        <version>3.3.4</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>
+]],
+            ["org.springframework.boot:spring-boot-dependencies:3.3.4"] = [[
+<project>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+        <version>3.3.4</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>
+]],
+          },
+        }),
+      })
+      plugin:add_dependency("org.springframework.boot:spring-boot-starter-web")
+      local pom = adapters.fs:read("pom.xml")
+      local deps = pom:match("<dependencies>(.-)</dependencies>")
+      assert_contains(deps, "<artifactId>spring-boot-starter-web</artifactId>")
+      assert_not_contains(deps, "<version>")
+      assert_eq(adapters.jdtls.refreshes, 1)
+    end,
+  },
+  {
+    "query from a test source root writes test scope",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        ui = fakes.ui({ file = "/workspace/src/test/java/com/example/FooTest.java" }),
+        central = fakes.central({
+          docs = {
+            { g = "org.junit.jupiter", a = "junit-jupiter", latestVersion = "5.10.3" },
+          },
+        }),
+      })
+      plugin:add_dependency("org.junit.jupiter:junit-jupiter")
+      assert_contains(adapters.fs:read("pom.xml"), "<scope>test</scope>")
+    end,
+  },
+  {
+    "main source root does not write test scope",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        ui = fakes.ui({ file = "/workspace/src/main/java/com/example/Foo.java" }),
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:add_dependency("com.google.guava:guava")
+      assert_not_contains(adapters.fs:read("pom.xml"), "<scope>test</scope>")
+    end,
+  },
+  {
+    "duplicate GAV does not rewrite the POM and still refreshes Maven / JDT",
+    function()
+      local pom = [[
+<project>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.4</version>
+  </parent>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>com.google.guava</groupId>
+      <artifactId>guava</artifactId>
+      <version>33.0.0-jre</version>
+    </dependency>
+  </dependencies>
+</project>
+]]
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = pom },
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:add_dependency("com.google.guava:guava")
+      assert_eq(#adapters.fs.writes, 0)
+      assert_eq(adapters.fs:read("pom.xml"), pom)
+      assert_eq(adapters.jdtls.refreshes, 1)
+    end,
+  },
+  {
+    "Solr failure loud-refuses and writes nothing",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        central = fakes.central({ error = "network" }),
+      })
+      plugin:add_dependency("com.google.guava:guava")
+      assert_contains(fakes.notify_text(adapters.ui), "Maven Central search failed")
+      assert_eq(#adapters.fs.writes, 0)
+      assert_eq(adapters.jdtls.refreshes, 0)
+    end,
+  },
+  {
+    "zero hits loud-refuse and write nothing",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        central = fakes.central({ docs = {} }),
+      })
+      plugin:add_dependency("com.google.guava:guava")
+      assert_contains(fakes.notify_text(adapters.ui), "No artifacts found")
+      assert_eq(#adapters.fs.writes, 0)
+      assert_eq(adapters.jdtls.refreshes, 0)
+    end,
+  },
+  {
+    "missing POM loud-refuses and writes nothing",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = {},
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:add_dependency("com.google.guava:guava")
+      assert_contains(fakes.notify_text(adapters.ui), "pom.xml is missing or invalid")
+      assert_eq(#adapters.fs.writes, 0)
+    end,
+  },
+  {
+    "unparseable POM loud-refuses and writes nothing",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = "not a project" },
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:add_dependency("com.google.guava:guava")
+      assert_contains(fakes.notify_text(adapters.ui), "pom.xml is missing or invalid")
+      assert_eq(#adapters.fs.writes, 0)
+    end,
+  },
+  {
+    "add-Dependency works on an in-contract Maven project without jdtls",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        jdtls = fakes.jdtls({ present = false, running = false }),
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:add_dependency("com.google.guava:guava")
+      assert_contains(adapters.fs:read("pom.xml"), "<artifactId>guava</artifactId>")
+      assert_eq(adapters.jdtls.refreshes, 0)
+    end,
+  },
+  {
+    "add-Dependency command does not edit a Java buffer",
+    function()
+      local java = "package com.example;\npublic class App {}\n"
+      local plugin, adapters = fakes.plugin({
+        files = {
+          ["pom.xml"] = IN_CONTRACT_POM,
+          ["src/main/java/com/example/App.java"] = java,
+        },
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:add_dependency("com.google.guava:guava")
+      assert_eq(adapters.fs:read("src/main/java/com/example/App.java"), java)
+      assert_eq(#adapters.fs.writes, 1)
+    end,
+  },
+  {
+    "inserts under project dependencies, not dependencyManagement",
+    function()
+      local pom = [[
+<project>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.4</version>
+  </parent>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.example</groupId>
+        <artifactId>bom-item</artifactId>
+        <version>1.0.0</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>
+]]
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = pom },
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:add_dependency("com.google.guava:guava")
+      local written = adapters.fs:read("pom.xml")
+      local dm = written:match("<dependencyManagement>(.-)</dependencyManagement>")
+      assert_not_contains(dm, "guava")
+      local deps = written:match("</dependencyManagement>.-<dependencies>(.-)</dependencies>")
+      assert_contains(deps, "<artifactId>guava</artifactId>")
+    end,
+  },
+  {
+    "prompts for a query when the command has no argument",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        ui = fakes.ui({ input_text = "com.google.guava:guava" }),
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:add_dependency()
+      assert_eq(adapters.ui.last_input_prompt, "Dependency: ")
+      assert_contains(adapters.fs:read("pom.xml"), "<artifactId>guava</artifactId>")
+    end,
+  },
+  {
+    "ambiguous FQCN goes through a picker",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = IN_CONTRACT_POM },
+        ui = fakes.ui({ pick_choice = 2 }),
+        central = fakes.central({
+          docs = {
+            { g = "org.example", a = "one", v = "1.0.0" },
+            { g = "com.other", a = "two", v = "2.0.0" },
+          },
+        }),
+      })
+      plugin:add_dependency("com.example.SharedType")
+      assert_eq(adapters.ui.pick_calls, 1)
+      assert_contains(adapters.fs:read("pom.xml"), "<artifactId>two</artifactId>")
+      assert_not_contains(adapters.fs:read("pom.xml"), "<artifactId>one</artifactId>")
+    end,
+  },
+  {
+    "imported BOM in local dependencyManagement omits version",
+    function()
+      local pom = [[
+<project>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-dependencies</artifactId>
+        <version>3.3.4</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>
+]]
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = pom },
+        central = fakes.central({
+          docs = {
+            {
+              g = "org.springframework.boot",
+              a = "spring-boot-starter-web",
+              latestVersion = "3.3.4",
+            },
+          },
+          poms = {
+            ["org.springframework.boot:spring-boot-dependencies:3.3.4"] = [[
+<project>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+        <version>3.3.4</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>
+]],
+          },
+        }),
+      })
+      plugin:add_dependency("org.springframework.boot:spring-boot-starter-web")
+      local deps = adapters.fs:read("pom.xml"):match("</dependencyManagement>.-<dependencies>(.-)</dependencies>")
+      assert_contains(deps, "<artifactId>spring-boot-starter-web</artifactId>")
+      assert_not_contains(deps, "<version>")
+    end,
+  },
+  {
+    "local dependencyManagement omits version without a parent fetch",
+    function()
+      local pom = [[
+<project>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.example</groupId>
+        <artifactId>lib</artifactId>
+        <version>9.9.9</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>
+]]
+      local plugin, adapters = fakes.plugin({
+        files = { ["pom.xml"] = pom },
+        central = fakes.central({
+          docs = {
+            { g = "com.example", a = "lib", latestVersion = "9.9.9" },
+          },
+        }),
+      })
+      plugin:add_dependency("com.example:lib")
+      local deps = adapters.fs:read("pom.xml"):match("</dependencyManagement>.-<dependencies>(.-)</dependencies>")
+      assert_contains(deps, "<artifactId>lib</artifactId>")
+      assert_not_contains(deps, "<version>")
     end,
   },
 }

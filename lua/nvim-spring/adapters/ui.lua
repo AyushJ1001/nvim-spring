@@ -76,4 +76,31 @@ function M:package_view(model)
   show_package_view(bufnr)
 end
 
+function M:input(prompt)
+  local ok, result = pcall(vim.fn.input, prompt)
+  if not ok then
+    return nil
+  end
+  return result
+end
+
+function M:pick(items, cb)
+  local labels = {}
+  local by_label = {}
+  for i, item in ipairs(items or {}) do
+    local label = item.label or item.g .. ":" .. item.a
+    labels[i] = label
+    by_label[label] = item
+  end
+  vim.ui.select(labels, { prompt = "Add Dependency" }, function(choice)
+    if cb then
+      cb(choice and by_label[choice] or nil)
+    end
+  end)
+end
+
+function M:current_file()
+  return vim.api.nvim_buf_get_name(0)
+end
+
 return M

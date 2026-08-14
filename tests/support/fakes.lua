@@ -85,11 +85,17 @@ function fakes.fs(opts)
   return fs
 end
 
-function fakes.ui()
+function fakes.ui(opts)
+  opts = opts or {}
   return {
     notifications = {},
     keymaps = {},
     package_views = {},
+    pick_calls = 0,
+    pick_items = nil,
+    pick_choice = opts.pick_choice,
+    input_text = opts.input_text,
+    file = opts.file,
     notify = function(self, message, level)
       self.notifications[#self.notifications + 1] = {
         message = message,
@@ -101,6 +107,27 @@ function fakes.ui()
     end,
     package_view = function(self, model)
       self.package_views[#self.package_views + 1] = model
+    end,
+    input = function(self, prompt)
+      self.last_input_prompt = prompt
+      return self.input_text
+    end,
+    pick = function(self, items, cb)
+      self.pick_calls = self.pick_calls + 1
+      self.pick_items = items
+      local choice = self.pick_choice
+      if type(choice) == "function" then
+        choice = choice(items)
+      elseif type(choice) == "number" then
+        choice = items and items[choice]
+      end
+      if cb then
+        cb(choice)
+      end
+      return choice
+    end,
+    current_file = function(self)
+      return self.file
     end,
   }
 end
@@ -139,19 +166,57 @@ function fakes.jdtls(opts)
   }
 end
 
+function fakes.central(opts)
+  opts = opts or {}
+  local central = {
+    docs = opts.docs or {},
+    error = opts.error,
+    poms = opts.poms or {},
+  }
+
+  local function search(self)
+    if self.error then
+      return nil, self.error
+    end
+    return self.docs
+  end
+
+  function central:search_coordinates()
+    return search(self)
+  end
+
+  function central:search_class()
+    return search(self)
+  end
+
+  function central:search_keyword()
+    return search(self)
+  end
+
+  function central:fetch_pom(g, a, v)
+    return self.poms[g .. ":" .. a .. ":" .. v]
+      or self.poms[g .. ":" .. a]
+      or self.poms.default
+  end
+
+  return central
+end
+
 function fakes.plugin(opts)
   opts = opts or {}
-  local ui = opts.ui or fakes.ui()
+  local ui = opts.ui or fakes.ui(opts)
   local jdtls = opts.jdtls or fakes.jdtls({ running = true, present = true })
   local fs = opts.fs or fakes.fs(opts)
+  local central = opts.central or fakes.central()
   local actions = require("nvim-spring.actions")
   local plugin = actions.new({
     fs = fs,
     ui = ui,
     jdtls = jdtls,
+    central = central,
     opts = opts.opts,
   })
-  return plugin, { fs = fs, ui = ui, jdtls = jdtls }
+  return plugin, { fs = fs, ui = ui, jdtls = jdtls, central = central }
 end
 
 function fakes.notify_text(ui)
