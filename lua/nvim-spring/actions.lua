@@ -134,14 +134,7 @@ function Actions:_initializr_url()
   return self.opts.initializr_url or "https://start.spring.io"
 end
 
-function Actions:_fetch_metadata()
-  if not self.http or not self.http.request then
-    return nil, "Initializr is unreachable."
-  end
-  local res = self.http:request({
-    url = self:_initializr_url(),
-    headers = initializr.headers(),
-  })
+function Actions:_metadata_from_response(res)
   if not res or res.error then
     return nil, "Initializr is unreachable."
   end
@@ -155,6 +148,19 @@ function Actions:_fetch_metadata()
     return nil, "Response is not Initializr metadata."
   end
   return res.body
+end
+
+function Actions:_fetch_metadata(on_done)
+  if not self.http or not self.http.request then
+    on_done(nil, "Initializr is unreachable.")
+    return
+  end
+  self.http:request({
+    url = self:_initializr_url(),
+    headers = initializr.headers(),
+  }, function(res)
+    on_done(self:_metadata_from_response(res))
+  end)
 end
 
 function Actions:_host_jdk_major()
@@ -197,28 +203,29 @@ function Actions:_generate(meta, answers)
     dependencies = deps,
     language = "java",
   })
-  local res = self.http:request({
+  self.http:request({
     url = url,
     headers = {
       ["User-Agent"] = initializr.USER_AGENT,
     },
-  })
-  if not res or res.error or res.status ~= 200 or res.body == nil then
-    self:_refuse("Initializr is unreachable.")
-    return
-  end
-  if not self.fs or not self.fs.extract_zip then
-    self:_refuse("Could not unzip the project.")
-    return
-  end
-  local ok = self.fs:extract_zip(res.body, dest)
-  if not ok then
-    self:_refuse("Could not unzip the project.")
-    return
-  end
-  if self.ui and self.ui.open_project then
-    self.ui:open_project(dest)
-  end
+  }, function(res)
+    if not res or res.error or res.status ~= 200 or res.body == nil then
+      self:_refuse("Initializr is unreachable.")
+      return
+    end
+    if not self.fs or not self.fs.extract_zip then
+      self:_refuse("Could not unzip the project.")
+      return
+    end
+    local ok = self.fs:extract_zip(res.body, dest)
+    if not ok then
+      self:_refuse("Could not unzip the project.")
+      return
+    end
+    if self.ui and self.ui.open_project then
+      self.ui:open_project(dest)
+    end
+  end)
 end
 
 function Actions:_run_wizard(spec, on_done)
@@ -246,28 +253,29 @@ end
 
 -- Initializr does not need the workspace Build tool.
 function Actions:init()
-  local meta, err = self:_fetch_metadata()
-  if not meta then
-    self:_refuse(err)
-    return
-  end
-  if not initializr.maven_project_type(meta) then
-    self:_refuse("Initializr has no Maven project type.")
-    return
-  end
-  local defaults = {
-    boot = initializr.default_boot(meta),
-    java = initializr.default_java(meta, self:_host_jdk_major()),
-  }
-  local spec = initializr.wizard_spec(meta, defaults, self:_initializr_url())
-  spec.preview = function(state)
-    return initializr.preview(state)
-  end
-  self:_run_wizard(spec, function(answers)
-    if not answers then
+  self:_fetch_metadata(function(meta, err)
+    if not meta then
+      self:_refuse(err)
       return
     end
-    self:_generate(meta, answers)
+    if not initializr.maven_project_type(meta) then
+      self:_refuse("Initializr has no Maven project type.")
+      return
+    end
+    local defaults = {
+      boot = initializr.default_boot(meta),
+      java = initializr.default_java(meta, self:_host_jdk_major()),
+    }
+    local spec = initializr.wizard_spec(meta, defaults, self:_initializr_url())
+    spec.preview = function(state)
+      return initializr.preview(state)
+    end
+    self:_run_wizard(spec, function(answers)
+      if not answers then
+        return
+      end
+      self:_generate(meta, answers)
+    end)
   end)
 end
 

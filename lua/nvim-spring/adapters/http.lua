@@ -11,28 +11,48 @@ local function decode_body(body, headers)
   return body
 end
 
-local function run_curl(args)
-  if vim.fn.executable("curl") ~= 1 then
+local function finish(on_done, res)
+  if not on_done then
+    return
+  end
+  if vim.schedule then
+    vim.schedule(function()
+      on_done(res)
+    end)
+    return
+  end
+  on_done(res)
+end
+
+local function read_tmp(tmp)
+  local file = io.open(tmp, "rb")
+  if not file then
     return nil
   end
-  if vim.system then
-    local result = vim.system(args, { text = true }):wait()
-    return result
+  local body = file:read("*a")
+  file:close()
+  os.remove(tmp)
+  return body
+end
+
+local function to_response(stdout, body, headers)
+  local status = tonumber((stdout or ""):match("(%d%d%d)")) or 0
+  if status == 0 then
+    return { error = "unreachable" }
   end
-  local cmd = {}
-  for _, arg in ipairs(args) do
-    cmd[#cmd + 1] = vim.fn.shellescape(arg)
-  end
-  local stdout = vim.fn.system(table.concat(cmd, " "))
   return {
-    code = vim.v.shell_error,
-    stdout = stdout,
-    stderr = "",
+    status = status,
+    body = decode_body(body, headers),
   }
 end
 
-function M:request(opts)
+function M:request(opts, on_done)
   opts = opts or {}
+  if vim.fn.executable("curl") ~= 1 then
+    finish(on_done, { error = "unreachable" })
+    return
+  end
+
   local tmp = vim.fn.tempname()
   local args = {
     "curl",
@@ -52,26 +72,29 @@ function M:request(opts)
   end
   args[#args + 1] = opts.url
 
-  local result = run_curl(args)
-  local body
-  local file = io.open(tmp, "rb")
-  if file then
-    body = file:read("*a")
-    file:close()
+  local function done(stdout)
+    finish(on_done, to_response(stdout, read_tmp(tmp), opts.headers))
   end
-  os.remove(tmp)
 
-  if not result then
-    return { error = "unreachable" }
+  if vim.system then
+    vim.system(args, { text = true }, function(result)
+      done(result and result.stdout)
+    end)
+    return
   end
-  local status = tonumber((result.stdout or ""):match("(%d%d%d)")) or 0
-  if status == 0 then
-    return { error = "unreachable" }
-  end
-  return {
-    status = status,
-    body = decode_body(body, opts.headers),
-  }
+
+  local chunks = {}
+  vim.fn.jobstart(args, {
+    stdout_buffered = true,
+    on_stdout = function(_, data)
+      if data then
+        chunks[#chunks + 1] = table.concat(data, "\n")
+      end
+    end,
+    on_exit = function()
+      done(table.concat(chunks))
+    end,
+  })
 end
 
 return M

@@ -343,26 +343,33 @@ function fakes.http(opts)
     zip_error = opts.zip_error,
   }
 
-  function http:request(req)
+  function http:request(req, on_done)
     self.requests[#self.requests + 1] = req
     local url = req.url or ""
     local is_zip = url:find("starter.zip", 1, true)
+    local res
     if is_zip then
       if self.zip_error then
-        return { error = self.zip_error }
+        res = { error = self.zip_error }
+      else
+        res = {
+          status = self.zip_status or 200,
+          body = self.archive,
+        }
       end
-      return {
-        status = self.zip_status or 200,
-        body = self.archive,
+    elseif self.error then
+      res = { error = self.error }
+    else
+      res = {
+        status = self.status or 200,
+        body = self.body,
       }
     end
-    if self.error then
-      return { error = self.error }
+    if on_done then
+      on_done(res)
+      return
     end
-    return {
-      status = self.status or 200,
-      body = self.body,
-    }
+    return res
   end
 
   return http
