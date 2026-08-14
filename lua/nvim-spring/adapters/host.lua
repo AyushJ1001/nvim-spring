@@ -48,10 +48,7 @@ function M:jdk_major()
   if not quoted then
     return nil
   end
-  if quoted:match("^1%.8") then
-    return 8
-  end
-  return tonumber(quoted:match("^(%d+)"))
+  return require("nvim-spring.initializr").parse_language_level(quoted)
 end
 
 return M

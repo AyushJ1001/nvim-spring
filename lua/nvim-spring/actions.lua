@@ -176,7 +176,15 @@ end
 function Actions:_generate(meta, answers)
   local maven_type = initializr.maven_project_type(meta)
   local artifact = answers.artifactId or "demo"
+  if artifact == "" or artifact == "." or artifact == ".." or artifact:find("[/\\]") then
+    self:_refuse("Artifact name is not valid.")
+    return
+  end
   local cwd = self.fs and self.fs.cwd and self.fs:cwd() or ""
+  if cwd == "" then
+    self:_refuse("Could not resolve the current directory.")
+    return
+  end
   local dest = self:_join(cwd, artifact)
   if self.fs and self.fs.exists and self.fs:exists(dest) then
     self:_refuse(artifact .. " already exists.")

@@ -91,6 +91,7 @@ end
 function M:extract_zip(archive, dest)
   dest = resolve(self, dest)
   local tmp = vim.fn.tempname() .. ".zip"
+  local staging = vim.fn.tempname()
   local f, err = io.open(tmp, "wb")
   if not f then
     return false, err
@@ -100,15 +101,20 @@ function M:extract_zip(archive, dest)
 
   local ok = false
   if vim.fn.executable("unzip") == 1 then
-    ok = run({ "unzip", "-o", "-q", tmp, "-d", dest })
+    ok = run({ "unzip", "-o", "-q", tmp, "-d", staging })
   elseif vim.fn.executable("python3") == 1 then
-    ok = run({ "python3", "-m", "zipfile", "-e", tmp, dest })
+    ok = run({ "python3", "-m", "zipfile", "-e", tmp, staging })
   end
   os.remove(tmp)
   if not ok then
-    pcall(vim.fn.delete, dest, "d")
+    pcall(vim.fn.delete, staging, "rf")
+    return false
   end
-  return ok
+  if vim.fn.rename(staging, dest) ~= 0 then
+    pcall(vim.fn.delete, staging, "rf")
+    return false
+  end
+  return true
 end
 
 return M

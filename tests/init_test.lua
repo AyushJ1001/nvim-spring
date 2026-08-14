@@ -342,4 +342,58 @@ return {
       assert_eq(adapters.ui.opened, nil)
     end,
   },
+  {
+    "Missing cwd loud-refuses and does not download starter.zip",
+    function()
+      local plugin, adapters = happy_plugin({ jdk_major = 21 })
+      adapters.fs.cwd = function()
+        return nil
+      end
+      plugin:setup({})
+      plugin:init()
+      assert_contains(fakes.notify_text(adapters.ui), "current directory")
+      assert_true(generate_request(adapters.http) == nil, "must not download")
+      assert_eq(#adapters.fs.writes, 0)
+    end,
+  },
+  {
+    "Invalid artifactId loud-refuses and does not download starter.zip",
+    function()
+      for _, artifact in ipairs({ "", ".", "..", "../demo", "/tmp/demo", "foo\\bar" }) do
+        local plugin, adapters = happy_plugin({
+          jdk_major = 21,
+          ui = fakes.ui({
+            wizard_answers = {
+              groupId = "com.example",
+              artifactId = artifact,
+              packageName = "com.example.demo",
+              bootVersion = "4.1.0",
+              javaVersion = "21",
+              dependencies = {},
+            },
+          }),
+        })
+        plugin:setup({})
+        plugin:init()
+        assert_contains(fakes.notify_text(adapters.ui), "not valid")
+        assert_true(generate_request(adapters.http) == nil, "must not download")
+        assert_eq(#adapters.fs.writes, 0)
+        assert_eq(adapters.ui.opened, nil)
+      end
+    end,
+  },
+  {
+    "Catalog entries that are not option tables are not Initializr metadata",
+    function()
+      local meta = fakes.initializr_metadata()
+      meta.type.values = { "maven-project" }
+      local plugin, adapters = fakes.plugin({
+        http = fakes.http({ status = 200, body = meta }),
+      })
+      plugin:setup({})
+      plugin:init()
+      assert_contains(fakes.notify_text(adapters.ui), "not Initializr")
+      assert_eq(#adapters.fs.writes, 0)
+    end,
+  },
 }

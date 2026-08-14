@@ -14,20 +14,41 @@ function M.headers()
   }
 end
 
+local function is_option_list(values, require_id)
+  if type(values) ~= "table" then
+    return false
+  end
+  for _, value in ipairs(values) do
+    if type(value) ~= "table" then
+      return false
+    end
+    if require_id and type(value.id) ~= "string" then
+      return false
+    end
+    if value.tags ~= nil and type(value.tags) ~= "table" then
+      return false
+    end
+    if value.values ~= nil and not is_option_list(value.values, false) then
+      return false
+    end
+  end
+  return true
+end
+
 function M.is_metadata(body)
   if type(body) ~= "table" then
     return false
   end
-  if type(body.bootVersion) ~= "table" then
+  if type(body.bootVersion) ~= "table" or not is_option_list(body.bootVersion.values, true) then
     return false
   end
-  if type(body.javaVersion) ~= "table" then
+  if type(body.javaVersion) ~= "table" or not is_option_list(body.javaVersion.values, true) then
     return false
   end
-  if type(body.dependencies) ~= "table" then
+  if type(body.dependencies) ~= "table" or not is_option_list(body.dependencies.values, false) then
     return false
   end
-  if type(body.type) ~= "table" or type(body.type.values) ~= "table" then
+  if type(body.type) ~= "table" or not is_option_list(body.type.values, true) then
     return false
   end
   return true
@@ -70,8 +91,9 @@ function M.parse_language_level(id)
     return nil
   end
   local raw = tostring(id)
-  if raw == "1.8" or raw == "8" then
-    return 8
+  local legacy = raw:match("^1%.(%d+)")
+  if legacy then
+    return tonumber(legacy)
   end
   return tonumber(raw:match("^(%d+)"))
 end
