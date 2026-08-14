@@ -2,6 +2,7 @@ local workspace = require("nvim-spring.workspace")
 local package_view = require("nvim-spring.package_view")
 local dependency = require("nvim-spring.dependency")
 local scaffold = require("nvim-spring.scaffold")
+local initializr = require("nvim-spring.initializr")
 
 local Actions = {}
 Actions.__index = Actions
@@ -22,6 +23,7 @@ function Actions.new(adapters)
   self.ui = adapters.ui
   self.jdtls = adapters.jdtls
   self.central = adapters.central
+  self.http = adapters.http
   self.host = adapters.host
   self.opts = adapters.opts or {}
   return self
@@ -121,16 +123,99 @@ function Actions:ensure_jdtls()
   self:_ensure_jdtls()
 end
 
--- Initializr does not need the workspace Build tool.
-function Actions:init() end
-
-function Actions:_gate()
-  local verdict = workspace.classify(self.fs)
-  if verdict.refuse then
-    self.ui:notify(verdict.message)
-    return false
+function Actions:_refuse(message)
+  if self.ui and self.ui.notify then
+    self.ui:notify(message)
   end
-  return true
+end
+
+function Actions:_initializr_url()
+  return self.opts.initializr_url or "https://start.spring.io"
+end
+
+function Actions:_fetch_metadata()
+  if not self.http or not self.http.request then
+    return nil, "Initializr is unreachable."
+  end
+  local res = self.http:request({
+    url = self:_initializr_url(),
+    headers = initializr.headers(),
+  })
+  if not res or res.error then
+    return nil, "Initializr is unreachable."
+  end
+  if res.status == 401 or res.status == 403 then
+    return nil, "Initializr returned " .. tostring(res.status) .. "."
+  end
+  if res.status ~= 200 then
+    return nil, "Initializr is unreachable."
+  end
+  if not initializr.is_metadata(res.body) then
+    return nil, "Response is not Initializr metadata."
+  end
+  return res.body
+end
+
+function Actions:_host_jdk_major()
+  if not self.host or not self.host.jdk_major then
+    return nil
+  end
+  return self.host:jdk_major()
+end
+
+function Actions:_join(root, rel)
+  if not rel or rel == "" then
+    return root
+  end
+  if rel:sub(1, 1) == "/" then
+    return rel
+  end
+  return root .. "/" .. rel
+end
+
+function Actions:_generate(meta, answers)
+  local maven_type = initializr.maven_project_type(meta)
+  local artifact = answers.artifactId or "demo"
+  local cwd = self.fs and self.fs.cwd and self.fs:cwd() or ""
+  local dest = self:_join(cwd, artifact)
+  if self.fs and self.fs.exists and self.fs:exists(dest) then
+    self:_refuse(artifact .. " already exists.")
+    return
+  end
+  local deps = initializr.dependency_query(answers.dependencies)
+  local url = initializr.starter_url(self:_initializr_url(), {
+    type = maven_type,
+    groupId = answers.groupId,
+    artifactId = artifact,
+    name = artifact,
+    packageName = answers.packageName,
+    bootVersion = answers.bootVersion,
+    javaVersion = answers.javaVersion,
+    dependencies = deps,
+    language = "java",
+  })
+  local res = self.http:request({
+    url = url,
+    headers = {
+      ["User-Agent"] = initializr.USER_AGENT,
+    },
+  })
+  if not res or res.error or res.status ~= 200 or res.body == nil then
+    self:_refuse("Initializr is unreachable.")
+    return
+  end
+  if not self.fs or not self.fs.extract_zip then
+    self:_refuse("Could not unzip the project.")
+    return
+  end
+  local ok = self.fs:extract_zip(res.body, dest)
+  if not ok then
+    self:_refuse("Could not unzip the project.")
+    return
+  end
+  if self.ui and self.ui.open_project then
+    self.ui:open_project(dest)
+  end
 end
 
 function Actions:_run_wizard(spec, on_done)
@@ -154,6 +239,42 @@ function Actions:_run_wizard(spec, on_done)
       finish(ret)
     end
   end
+end
+
+-- Initializr does not need the workspace Build tool.
+function Actions:init()
+  local meta, err = self:_fetch_metadata()
+  if not meta then
+    self:_refuse(err)
+    return
+  end
+  if not initializr.maven_project_type(meta) then
+    self:_refuse("Initializr has no Maven project type.")
+    return
+  end
+  local defaults = {
+    boot = initializr.default_boot(meta),
+    java = initializr.default_java(meta, self:_host_jdk_major()),
+  }
+  local spec = initializr.wizard_spec(meta, defaults, self:_initializr_url())
+  spec.preview = function(state)
+    return initializr.preview(state)
+  end
+  self:_run_wizard(spec, function(answers)
+    if not answers then
+      return
+    end
+    self:_generate(meta, answers)
+  end)
+end
+
+function Actions:_gate()
+  local verdict = workspace.classify(self.fs)
+  if verdict.refuse then
+    self.ui:notify(verdict.message)
+    return false
+  end
+  return true
 end
 
 function Actions:create()

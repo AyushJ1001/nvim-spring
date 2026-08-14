@@ -75,4 +75,41 @@ function M:write(path, content)
   f:close()
 end
 
+local function run(args)
+  if vim.system then
+    local result = vim.system(args, { text = true }):wait()
+    return result.code == 0
+  end
+  local cmd = {}
+  for _, arg in ipairs(args) do
+    cmd[#cmd + 1] = vim.fn.shellescape(arg)
+  end
+  vim.fn.system(table.concat(cmd, " "))
+  return vim.v.shell_error == 0
+end
+
+function M:extract_zip(archive, dest)
+  dest = resolve(self, dest)
+  local tmp = vim.fn.tempname() .. ".zip"
+  local f, err = io.open(tmp, "wb")
+  if not f then
+    return false, err
+  end
+  f:write(archive)
+  f:close()
+
+  local ok = false
+  if vim.fn.executable("unzip") == 1 then
+    ok = run({ "unzip", "-o", "-q", tmp, "-d", dest })
+  elseif vim.fn.executable("python3") == 1 then
+    ok = run({ "python3", "-m", "zipfile", "-e", tmp, dest })
+  end
+  os.remove(tmp)
+  if not ok then
+    pcall(vim.fn.delete, dest, "d")
+  end
+  return ok
+end
+
 return M
+

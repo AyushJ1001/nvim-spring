@@ -84,6 +84,22 @@ function fakes.fs(opts)
     self.writes[#self.writes + 1] = full
   end
 
+  function fs:extract_zip(archive, dest)
+    dest = join(root, dest)
+    if type(archive) ~= "table" then
+      return false
+    end
+    local tree = archive.__nvim_spring_files or archive
+    for rel, content in pairs(tree) do
+      if rel ~= "__nvim_spring_files" then
+        local full = dest .. "/" .. rel
+        files[full] = content
+        self.writes[#self.writes + 1] = full
+      end
+    end
+    return true
+  end
+
   return fs
 end
 
@@ -161,12 +177,29 @@ function fakes.ui(opts)
       if type(answers) == "function" then
         answers = answers(spec)
       end
+      if answers == nil then
+        answers = {}
+        for _, step in ipairs(spec.steps or {}) do
+          for _, field in ipairs(step.fields or {}) do
+            answers[field.name] = field.default
+          end
+        end
+      end
+      if answers == false then
+        if cb then
+          cb(nil)
+        end
+        return false
+      end
       if cb then
         cb(answers)
       end
       return answers
     end,
     open_file = function(self, path)
+      self.opened = path
+    end,
+    open_project = function(self, path)
       self.opened = path
     end,
   }
@@ -248,6 +281,98 @@ function fakes.central(opts)
   return central
 end
 
+function fakes.initializr_metadata(opts)
+  opts = opts or {}
+  return {
+    groupId = { type = "text", default = opts.group or "com.example" },
+    artifactId = { type = "text", default = opts.artifact or "demo" },
+    packageName = { type = "text", default = opts.package or "com.example.demo" },
+    bootVersion = {
+      type = "single-select",
+      default = opts.boot_default or "4.1.0",
+      values = opts.boot_values or {
+        { id = "4.1.1-SNAPSHOT", name = "4.1.1 (SNAPSHOT)" },
+        { id = "4.1.0", name = "4.1.0" },
+        { id = "4.0.7", name = "4.0.7" },
+      },
+    },
+    javaVersion = {
+      type = "single-select",
+      default = opts.java_default or "17",
+      values = opts.java_values or {
+        { id = "25", name = "25" },
+        { id = "21", name = "21" },
+        { id = "17", name = "17" },
+      },
+    },
+    type = {
+      type = "action",
+      default = opts.type_default or "gradle-project",
+      values = opts.types or {
+        {
+          id = "gradle-project",
+          name = "Gradle Project",
+          tags = { build = "gradle", format = "project" },
+        },
+        {
+          id = "maven-project",
+          name = "Maven Project",
+          tags = { build = "maven", format = "project" },
+        },
+      },
+    },
+    dependencies = {
+      type = "hierarchical-multi-select",
+      values = opts.dependencies or {
+        {
+          name = "Web",
+          values = {
+            { id = "web", name = "Spring Web", description = "MVC + Tomcat" },
+            { id = "devtools", name = "Spring Boot DevTools", description = "automatic context restart" },
+          },
+        },
+      },
+    },
+  }
+end
+
+function fakes.http(opts)
+  opts = opts or {}
+  local http = {
+    requests = {},
+    error = opts.error,
+    status = opts.status,
+    body = opts.body,
+    archive = opts.archive,
+    zip_status = opts.zip_status,
+    zip_error = opts.zip_error,
+  }
+
+  function http:request(req)
+    self.requests[#self.requests + 1] = req
+    local url = req.url or ""
+    local is_zip = url:find("starter.zip", 1, true)
+    if is_zip then
+      if self.zip_error then
+        return { error = self.zip_error }
+      end
+      return {
+        status = self.zip_status or 200,
+        body = self.archive,
+      }
+    end
+    if self.error then
+      return { error = self.error }
+    end
+    return {
+      status = self.status or 200,
+      body = self.body,
+    }
+  end
+
+  return http
+end
+
 function fakes.host(opts)
   opts = opts or {}
   local bins = opts.bins or { mvn = true }
@@ -257,6 +382,7 @@ function fakes.host(opts)
     stops = {},
     running = {},
     next_id = 1,
+    jdk = opts.jdk_major,
   }
 
   function host:has(bin)
@@ -282,6 +408,10 @@ function fakes.host(opts)
     end
   end
 
+  function host:jdk_major()
+    return self.jdk
+  end
+
   return host
 end
 
@@ -291,17 +421,19 @@ function fakes.plugin(opts)
   local jdtls = opts.jdtls or fakes.jdtls({ running = true, present = true })
   local fs = opts.fs or fakes.fs(opts)
   local central = opts.central or fakes.central()
-  local host = opts.host or fakes.host()
+  local http = opts.http or fakes.http({ error = "unreachable" })
+  local host = opts.host or fakes.host({ jdk_major = 21 })
   local actions = require("nvim-spring.actions")
   local plugin = actions.new({
     fs = fs,
     ui = ui,
     jdtls = jdtls,
     central = central,
+    http = http,
     host = host,
     opts = opts.opts,
   })
-  return plugin, { fs = fs, ui = ui, jdtls = jdtls, central = central, host = host }
+  return plugin, { fs = fs, ui = ui, jdtls = jdtls, central = central, http = http, host = host }
 end
 
 function fakes.notify_text(ui)

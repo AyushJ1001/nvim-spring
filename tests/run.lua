@@ -79,6 +79,7 @@ end
 
 local files = {
   here .. "/actions_test.lua",
+  here .. "/init_test.lua",
 }
 
 io.write("nvim-spring tests\n")
