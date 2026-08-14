@@ -13,7 +13,7 @@ A program that must exist on the machine outside Neovim.
 _Avoid_: system dependency, runtime (when meaning a PATH binary)
 
 **Build tool**:
-The project's Maven or Gradle system. It owns the build file, where a **Dependency** is declared, and the source roots and compile output a **Package view** and reload use.
+The project's Maven or Gradle system. It owns the build file, where a **Dependency** is declared, and the source roots and compile output a **Package view** and **Reload** use.
 _Avoid_: build system, compiler (when meaning Maven or Gradle)
 
 **Plugin dependency**:
@@ -39,3 +39,7 @@ _Avoid_: file tree, project explorer (when meaning the Java-organized view)
 **Spring Boot project**:
 A Java project that uses Spring Boot.
 _Avoid_: Spring project (when Boot-specific behaviour is meant)
+
+**Reload**:
+A DevTools automatic restart of a running **Spring Boot project**'s application context, triggered by changes in exploded classpath output.
+_Avoid_: LiveReload, HMR, hot reload, fast restart
