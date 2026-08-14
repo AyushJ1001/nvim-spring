@@ -21,7 +21,7 @@ The project's Maven or Gradle system. It owns the build file, where a **Dependen
 _Avoid_: build system, compiler (when meaning Maven or Gradle)
 
 **Plugin dependency**:
-A Neovim plugin this plugin requires.
+A Neovim plugin this plugin uses when it is present. Presence is not required unless a decision says so.
 _Avoid_: host tool, dependency (when meaning another plugin)
 
 **Dependency**:
