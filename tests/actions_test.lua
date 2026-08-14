@@ -264,4 +264,200 @@ return {
       assert_eq(#adapters.ui.keymaps, 0)
     end,
   },
+  {
+    "Package view from Maven source roots without jdtls renders one project of roots and packages",
+    function()
+      local plugin, adapters = fakes.plugin({
+        jdtls = fakes.jdtls({ present = false, running = false }),
+        files = {
+          ["pom.xml"] = [[
+<project>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.4</version>
+  </parent>
+  <artifactId>demo</artifactId>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+</project>
+]],
+          ["src/main/java/com/example/App.java"] = "package com.example;\n",
+          ["src/main/java/com/example/web/Home.java"] = "package com.example.web;\n",
+          ["src/test/java/com/example/AppTest.java"] = "package com.example;\n",
+        },
+      })
+      plugin:packages()
+      local model = fakes.last_package_view(adapters.ui)
+      assert_true(model ~= nil, "editor adapter is asked to render a Package view")
+      assert_eq(model.name, "demo")
+      assert_eq(#model.roots, 2)
+      assert_eq(model.roots[1].path, "src/main/java")
+      assert_eq(table.concat(model.roots[1].packages, ","), "com.example,com.example.web")
+      assert_eq(model.roots[2].path, "src/test/java")
+      assert_eq(table.concat(model.roots[2].packages, ","), "com.example")
+      assert_eq(adapters.jdtls.list_source_path_calls, 0)
+      assert_eq(#adapters.fs.writes, 0)
+    end,
+  },
+  {
+    "Package view uses jdtls listSourcePaths when a client is up and keeps one project",
+    function()
+      local plugin, adapters = fakes.plugin({
+        jdtls = fakes.jdtls({
+          present = true,
+          running = true,
+          source_paths = {
+            {
+              path = "/workspace/src/main/java",
+              projectName = "demo",
+            },
+            {
+              path = "/workspace/src/test/java",
+              projectName = "demo-tests",
+            },
+            {
+              path = "file:///workspace/target/generated-sources/annotations",
+              projectName = "demo",
+            },
+          },
+        }),
+        files = {
+          ["pom.xml"] = [[
+<project>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.4</version>
+  </parent>
+  <artifactId>demo</artifactId>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+</project>
+]],
+          ["src/main/java/com/example/App.java"] = "package com.example;\n",
+          ["src/test/java/com/example/AppTest.java"] = "package com.example;\n",
+          ["target/generated-sources/annotations/com/example/Generated.java"] = "package com.example;\n",
+        },
+      })
+      plugin:packages()
+      local model = fakes.last_package_view(adapters.ui)
+      assert_true(model ~= nil, "editor adapter is asked to render a Package view")
+      assert_eq(model.name, "demo")
+      assert_eq(#model.roots, 3, "jdtls extra roots of the same POM are included")
+      assert_eq(model.roots[1].path, "src/main/java")
+      assert_eq(table.concat(model.roots[1].packages, ","), "com.example")
+      assert_eq(model.roots[2].path, "src/test/java")
+      assert_eq(table.concat(model.roots[2].packages, ","), "com.example")
+      assert_eq(model.roots[3].path, "target/generated-sources/annotations")
+      assert_eq(table.concat(model.roots[3].packages, ","), "com.example")
+      for _, root in ipairs(model.roots) do
+        assert_true(root.path:sub(1, 1) ~= "/", "Package view uses project-relative source roots, not filesystem paths")
+      end
+      assert_eq(adapters.jdtls.list_source_path_calls, 1)
+    end,
+  },
+  {
+    "Package view falls back to Maven layout when jdtls is up but listSourcePaths is empty",
+    function()
+      local plugin, adapters = fakes.plugin({
+        jdtls = fakes.jdtls({
+          present = true,
+          running = true,
+          source_paths = {},
+        }),
+        files = {
+          ["pom.xml"] = [[
+<project>
+  <artifactId>demo</artifactId>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+</project>
+]],
+          ["src/main/java/com/example/App.java"] = "package com.example;\n",
+        },
+      })
+      plugin:packages()
+      local model = fakes.last_package_view(adapters.ui)
+      assert_eq(#model.roots, 1)
+      assert_eq(model.roots[1].path, "src/main/java")
+      assert_eq(table.concat(model.roots[1].packages, ","), "com.example")
+      assert_eq(adapters.jdtls.list_source_path_calls, 1)
+    end,
+  },
+  {
+    "Package view uses POM sourceDirectory of the workspace-root POM without jdtls",
+    function()
+      local plugin, adapters = fakes.plugin({
+        jdtls = fakes.jdtls({ present = false, running = false }),
+        files = {
+          ["pom.xml"] = [[
+<project>
+  <artifactId>demo</artifactId>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+  <build>
+    <sourceDirectory>src</sourceDirectory>
+    <testSourceDirectory>test</testSourceDirectory>
+  </build>
+</project>
+]],
+          ["src/com/example/App.java"] = "package com.example;\n",
+          ["test/com/example/AppTest.java"] = "package com.example;\n",
+        },
+      })
+      plugin:packages()
+      local model = fakes.last_package_view(adapters.ui)
+      assert_eq(#model.roots, 2)
+      assert_eq(model.roots[1].path, "src")
+      assert_eq(table.concat(model.roots[1].packages, ","), "com.example")
+      assert_eq(model.roots[2].path, "test")
+      assert_eq(table.concat(model.roots[2].packages, ","), "com.example")
+    end,
+  },
+  {
+    "Package view keeps only source roots under the workspace-root POM when jdtls lists extras",
+    function()
+      local plugin, adapters = fakes.plugin({
+        jdtls = fakes.jdtls({
+          present = true,
+          running = true,
+          source_paths = {
+            { path = "/workspace/src/main/java", projectName = "demo" },
+            { path = "/other/project/src/main/java", projectName = "other" },
+          },
+        }),
+        files = {
+          ["pom.xml"] = [[
+<project>
+  <artifactId>demo</artifactId>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+</project>
+]],
+          ["src/main/java/com/example/App.java"] = "package com.example;\n",
+        },
+      })
+      plugin:packages()
+      local model = fakes.last_package_view(adapters.ui)
+      assert_eq(#model.roots, 1)
+      assert_eq(model.roots[1].path, "src/main/java")
+    end,
+  },
+  {
+    "Build-tool refuse does not open a Package view",
+    function()
+      local plugin, adapters = fakes.plugin({
+        files = { ["build.gradle"] = "plugins { id 'java' }\n" },
+      })
+      plugin:packages()
+      assert_eq(#adapters.ui.package_views, 0)
+      assert_contains(fakes.notify_text(adapters.ui), "not implemented yet")
+    end,
+  },
 }
