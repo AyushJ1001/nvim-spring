@@ -17,7 +17,7 @@ The project's Java release (`maven.compiler.release` / `java.version`), not the 
 _Avoid_: Java version (when it is unclear which of the two is meant), JDK version (when meaning the project)
 
 **Build tool**:
-The project's Maven or Gradle system. It owns the build file, where a **Dependency** is declared, and the source roots and compile output a **Package view** and reload use.
+The project's Maven or Gradle system. It owns the build file, where a **Dependency** is declared, and the source roots and compile output a **Package view** and **Reload** use.
 _Avoid_: build system, compiler (when meaning Maven or Gradle)
 
 **Plugin dependency**:
@@ -51,3 +51,7 @@ _Avoid_: Spring project (when Boot-specific behaviour is meant)
 **Initializr**:
 An HTTP service that creates a **Spring Boot project**. start.spring.io is one instance; the Plugin uses a single base URL.
 _Avoid_: initializer, generator, starter.io
+
+**Reload**:
+A DevTools automatic restart of a running **Spring Boot project**'s application context, triggered by changes in exploded classpath output.
+_Avoid_: LiveReload, HMR, hot reload, fast restart
