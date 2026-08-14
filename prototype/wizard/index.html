@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — throwaway. Not the plugin.
+  Three variants of the Wizard (Create Scaffold + Initializr), switchable via ?variant=.
+  Question: sequential pickers vs one floating form vs a preview-led split.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wizard look prototype — nvim-spring</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #1a1b26;
+      --bg-dark: #16161e;
+      --bg-float: #1f2335;
+      --bg-hi: #292e42;
+      --bg-sel: #3d59a1;
+      --fg: #c0caf5;
+      --fg-dim: #a9b1d6;
+      --comment: #565f89;
+      --blue: #7aa2f7;
+      --cyan: #7dcfff;
+      --green: #9ece6a;
+      --orange: #ff9e64;
+      --purple: #bb9af7;
+      --red: #f7768e;
+      --yellow: #e0af68;
+      --magenta: #ff007c;
+      --border: #3b4261;
+      --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #0d0e14; color: var(--fg); font-family: var(--mono); overflow-x: hidden; }
+    body { display: flex; flex-direction: column; min-height: 100%; }
+
+    .demo-banner {
+      flex: 0 0 auto;
+      background: #11131c;
+      border-bottom: 1px solid var(--border);
+      padding: 10px 16px 8px;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .demo-banner strong { color: var(--orange); font-weight: 600; }
+    .demo-banner p { margin: 0 0 8px; color: var(--fg-dim); max-width: 1100px; }
+    .demo-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .chip {
+      border: 1px solid var(--border);
+      background: var(--bg-dark);
+      color: var(--fg);
+      font: inherit;
+      font-size: 12px;
+      padding: 4px 10px;
+      cursor: pointer;
+    }
+    .chip[aria-pressed="true"] { border-color: var(--blue); color: var(--blue); background: #1a2744; }
+    .chip:focus-visible { outline: 1px solid var(--cyan); }
+
+    .nvim {
+      flex: 1 1 auto;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 0;
+      background: var(--bg);
+      position: relative;
+    }
+    .tabline {
+      display: flex; align-items: stretch; background: var(--bg-dark); font-size: 12px;
+      border-bottom: 1px solid #0d0e14;
+    }
+    .tab { padding: 6px 14px; color: var(--comment); border-right: 1px solid #0d0e14; }
+    .tab.on { background: var(--bg); color: var(--fg); }
+    .workspace {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      min-height: 0;
+    }
+    .sidebar {
+      background: var(--bg-dark);
+      border-right: 1px solid #0d0e14;
+      padding: 8px 0;
+      font-size: 12px;
+      overflow: auto;
+    }
+    .side-title { color: var(--comment); letter-spacing: .08em; font-size: 10px; padding: 4px 12px 8px; }
+    .node { padding: 1px 12px; color: var(--fg-dim); white-space: nowrap; }
+    .node.dir { color: var(--blue); }
+    .node.root { color: var(--yellow); }
+    .node.sel { background: var(--bg-hi); color: var(--fg); }
+    .node .ico { color: var(--comment); margin-right: 6px; }
+    .editor { padding: 10px 16px 16px; font-size: 13px; line-height: 1.55; overflow: auto; }
+    .ln { display: grid; grid-template-columns: 36px 1fr; gap: 14px; }
+    .ln .n { color: var(--comment); text-align: right; user-select: none; }
+    .kw { color: var(--purple); }
+    .ty { color: var(--yellow); }
+    .an { color: var(--cyan); }
+    .st { color: var(--green); }
+    .cm { color: var(--comment); }
+    .status {
+      display: flex; justify-content: space-between; font-size: 11px; background: #3b4261; color: var(--fg);
+    }
+    .status .l, .status .r { display: flex; }
+    .pill { padding: 3px 10px; }
+    .pill.mode { background: var(--blue); color: #1a1b26; font-weight: 600; }
+    .pill.git { background: #2a334d; color: var(--green); }
+
+    .scrim {
+      position: absolute; inset: 28px 0 22px;
+      background: rgba(13, 14, 20, .35);
+      display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+    }
+    .scrim[hidden] { display: none; }
+
+    .float {
+      background: var(--bg-float);
+      border: 1px solid var(--border);
+      box-shadow: 0 18px 50px rgba(0,0,0,.45);
+      min-width: 0;
+      max-width: 920px;
+      width: min(92vw, 560px);
+    }
+    .float.wide { width: min(94vw, 920px); }
+    .float.form { width: min(94vw, 780px); }
+    .fh {
+      display: flex; justify-content: space-between; align-items: baseline;
+      padding: 8px 12px 6px; border-bottom: 1px solid var(--border); font-size: 12px;
+    }
+    .fh .title { color: var(--blue); font-weight: 600; }
+    .fh .meta { color: var(--comment); }
+    .ff { padding: 8px 12px 10px; font-size: 11px; color: var(--comment); border-top: 1px solid var(--border); display: flex; gap: 14px; flex-wrap: wrap; }
+    .k { color: var(--orange); }
+
+    .search {
+      display: flex; align-items: center; gap: 8px;
+      margin: 10px 12px 6px; padding: 6px 8px;
+      border: 1px solid var(--border); background: var(--bg-dark);
+    }
+    .search input, .field input {
+      flex: 1; background: transparent; border: 0; color: var(--fg); font: inherit; outline: none; min-width: 0;
+    }
+    .prompt { color: var(--cyan); }
+
+    .items { max-height: 280px; overflow: auto; padding: 4px 0 8px; }
+    .item {
+      display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: center;
+      padding: 4px 12px; font-size: 13px; cursor: pointer;
+    }
+    .item:hover, .item:focus { outline: none; background: var(--bg-hi); }
+    .item.on { background: var(--bg-sel); }
+    .item .mark { color: var(--green); }
+    .item .desc { color: var(--comment); font-size: 11px; padding-left: 4px; }
+    .item .tag { color: var(--yellow); font-size: 11px; }
+
+    .notify {
+      position: absolute; right: 18px; bottom: 36px;
+      background: var(--bg-float); border: 1px solid var(--green);
+      padding: 8px 12px; font-size: 12px; color: var(--green);
+      max-width: 420px;
+    }
+    .notify[hidden] { display: none; }
+
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+    .col { padding: 10px 12px 12px; }
+    .col + .col { border-left: 1px solid var(--border); }
+    .field { margin-bottom: 8px; }
+    .field label { display: block; color: var(--comment); font-size: 10px; letter-spacing: .06em; margin-bottom: 3px; }
+    .field .box {
+      display: flex; border: 1px solid var(--border); background: var(--bg-dark); padding: 5px 8px;
+    }
+    .kinds { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow: auto; }
+    .kind {
+      text-align: left; border: 1px solid transparent; background: transparent; color: var(--fg);
+      font: inherit; font-size: 12px; padding: 4px 8px; cursor: pointer;
+    }
+    .kind.on { border-color: var(--blue); background: #1a2744; color: var(--blue); }
+    .deps { max-height: 220px; overflow: auto; border: 1px solid var(--border); background: var(--bg-dark); }
+    .dep {
+      display: flex; gap: 8px; align-items: flex-start; padding: 5px 8px; font-size: 12px; cursor: pointer;
+    }
+    .dep:hover { background: var(--bg-hi); }
+    .dep.on { background: #1a2744; }
+    .dep .boxx { color: var(--green); width: 14px; }
+    .actions { display: flex; justify-content: flex-end; gap: 8px; padding: 0 12px 12px; }
+    .btn {
+      font: inherit; font-size: 12px; padding: 5px 12px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--bg-dark); color: var(--fg);
+    }
+    .btn.pri { border-color: var(--blue); color: #1a1b26; background: var(--blue); font-weight: 600; }
+
+    .split { display: grid; grid-template-columns: 1fr 1fr; min-height: 360px; }
+    .preview {
+      background: var(--bg-dark); border-right: 1px solid var(--border);
+      padding: 10px 12px; font-size: 12px; overflow: auto;
+    }
+    .preview .ph { color: var(--comment); font-size: 10px; letter-spacing: .08em; margin-bottom: 8px; }
+    .preview pre { margin: 0; white-space: pre-wrap; color: var(--fg-dim); }
+    .steps { display: flex; gap: 6px; padding: 8px 12px 0; font-size: 11px; color: var(--comment); }
+    .steps .s.on { color: var(--cyan); }
+    .steps .s.done { color: var(--green); }
+
+    .state-dump {
+      position: absolute; left: 8px; bottom: 28px;
+      max-width: 340px; max-height: 160px; overflow: auto;
+      background: rgba(22,22,30,.92); border: 1px dashed var(--comment);
+      color: var(--comment); font-size: 10px; padding: 6px 8px; line-height: 1.4;
+    }
+
+    .switcher {
+      position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 10px;
+      background: #f4f4f5; color: #18181b;
+      border-radius: 999px; padding: 8px 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.4);
+      z-index: 50; font-size: 13px; font-family: ui-sans-serif, system-ui, sans-serif;
+    }
+    .switcher button {
+      width: 28px; height: 28px; border-radius: 999px; border: 0; cursor: pointer;
+      background: #18181b; color: #fafafa; font-size: 16px;
+    }
+    .switcher .lab { min-width: min(240px, 52vw); text-align: center; font-weight: 600; }
+    .switcher .sub { display: block; font-weight: 400; font-size: 11px; color: #52525b; }
+
+    @media (max-width: 800px) {
+      .workspace { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .form-grid, .split { grid-template-columns: 1fr; }
+      .col + .col { border-left: 0; border-top: 1px solid var(--border); }
+    }
+  </style>
+</head>
+<body>
+  <header class="demo-banner">
+    <p><strong>PROTOTYPE — throwaway.</strong> What should the <em>Wizard</em> look like? Same surface for create Scaffold (from the Package view) and Initializr. Locked already: multi-step, on-demand, floating. These three disagree about structure, not colour.</p>
+    <div class="demo-row">
+      <span style="color:var(--comment)">Demo flow</span>
+      <button type="button" class="chip" data-flow="create" aria-pressed="true">Create Scaffold</button>
+      <button type="button" class="chip" data-flow="initializr" aria-pressed="false">Initializr</button>
+      <button type="button" class="chip" id="reset">Reset this variant</button>
+    </div>
+  </header>
+
+  <div class="nvim" id="nvim">
+    <div class="tabline">
+      <div class="tab on">OrderController.java</div>
+      <div class="tab">DemoApplication.java</div>
+    </div>
+    <div class="workspace">
+      <aside class="sidebar" aria-label="Package view">
+        <div class="side-title">PACKAGE VIEW</div>
+        <div class="node root">demo</div>
+        <div class="node dir"><span class="ico">▾</span>src/main/java</div>
+        <div class="node dir" style="padding-left:22px"><span class="ico">▾</span>com.example.demo</div>
+        <div class="node" style="padding-left:36px">DemoApplication</div>
+        <div class="node dir" style="padding-left:36px"><span class="ico">▾</span>web</div>
+        <div class="node sel" style="padding-left:50px">OrderController</div>
+        <div class="node dir" style="padding-left:36px"><span class="ico">▸</span>service</div>
+        <div class="node dir"><span class="ico">▸</span>src/test/java</div>
+      </aside>
+      <main class="editor">
+        <div class="ln"><span class="n">1</span><span><span class="kw">package</span> com.example.demo.web;</span></div>
+        <div class="ln"><span class="n">2</span><span></span></div>
+        <div class="ln"><span class="n">3</span><span><span class="kw">import</span> org.springframework.web.bind.annotation.GetMapping;</span></div>
+        <div class="ln"><span class="n">4</span><span><span class="kw">import</span> org.springframework.web.bind.annotation.RestController;</span></div>
+        <div class="ln"><span class="n">5</span><span></span></div>
+        <div class="ln"><span class="n">6</span><span><span class="an">@RestController</span></span></div>
+        <div class="ln"><span class="n">7</span><span><span class="kw">public class</span> <span class="ty">OrderController</span> {</span></div>
+        <div class="ln"><span class="n">8</span><span></span></div>
+        <div class="ln"><span class="n">9</span><span>  <span class="an">@GetMapping</span>(<span class="st">"/orders"</span>)</span></div>
+        <div class="ln"><span class="n">10</span><span>  <span class="kw">public</span> <span class="ty">String</span> list() {</span></div>
+        <div class="ln"><span class="n">11</span><span>    <span class="kw">return</span> <span class="st">"ok"</span>;</span></div>
+        <div class="ln"><span class="n">12</span><span>  }</span></div>
+        <div class="ln"><span class="n">13</span><span>}</span></div>
+        <div class="ln"><span class="n">14</span><span></span></div>
+        <div class="ln"><span class="n">15</span><span><span class="cm">// cursor on package web — create takes Package from here</span></span></div>
+      </main>
+    </div>
+    <div class="status">
+      <div class="l"><span class="pill mode">NORMAL</span><span class="pill git"> main</span><span class="pill" id="status-msg">nvim-spring</span></div>
+      <div class="r"><span class="pill">java</span><span class="pill">utf-8</span><span class="pill">15:1</span></div>
+    </div>
+
+    <div class="scrim" id="scrim"></div>
+    <div class="notify" id="notify" hidden></div>
+    <pre class="state-dump" id="state"></pre>
+  </div>
+
+  <div class="switcher" id="switcher">
+    <button type="button" id="prev" aria-label="Previous variant">←</button>
+    <div class="lab" id="switcher-lab">A<span class="sub">Sequential pickers</span></div>
+    <button type="button" id="next" aria-label="Next variant">→</button>
+  </div>
+
+  <script>
+    const KINDS = [
+      { id: "class", label: "Class", desc: "plain Java type" },
+      { id: "interface", label: "Interface", desc: "plain Java type" },
+      { id: "record", label: "Record", desc: "plain Java type" },
+      { id: "enum", label: "Enum", desc: "plain Java type" },
+      { id: "controller", label: "RestController", desc: "Spring stereotype" },
+      { id: "service", label: "Service", desc: "Spring stereotype" },
+      { id: "repository", label: "Repository", desc: "Spring stereotype" },
+    ];
+    const BOOTS = ["4.0.0", "3.5.5", "3.4.9"];
+    const JAVAS = ["26", "25", "21", "17"];
+    const DEPS = [
+      { id: "web", label: "Spring Web", desc: "REST, Tomcat" },
+      { id: "data-jpa", label: "Spring Data JPA", desc: "Jakarta Persistence" },
+      { id: "devtools", label: "Spring Boot DevTools", desc: "Reload" },
+      { id: "validation", label: "Validation", desc: "Bean Validation" },
+      { id: "actuator", label: "Actuator", desc: "production endpoints" },
+      { id: "security", label: "Spring Security", desc: "authn / authz" },
+    ];
+    const VARIANT_META = {
+      A: { name: "Sequential pickers", blurb: "One snacks-style picker per decision." },
+      B: { name: "One floating form", blurb: "Every field visible at once." },
+      C: { name: "Preview-led split", blurb: "Live file / tree on the left, current step on the right." },
+    };
+    const KEYS = ["A", "B", "C"];
+
+    const defaultState = () => ({
+      variant: "A",
+      flow: "create",
+      step: 0,
+      cursor: 0,
+      filter: "",
+      create: { kind: "controller", name: "PaymentController", pkg: "com.example.demo.web" },
+      init: {
+        boot: "4.0.0",
+        java: "26",
+        group: "com.example",
+        artifact: "demo",
+        name: "demo",
+        pkg: "com.example.demo",
+        packaging: "jar",
+        deps: ["web", "devtools"],
+      },
+      done: null,
+      lastAction: "opened",
+    });
+
+    let S = defaultState();
+
+    function params() { return new URLSearchParams(location.search); }
+    function readVariant() {
+      const v = (params().get("variant") || "A").toUpperCase();
+      return KEYS.includes(v) ? v : "A";
+    }
+    function setVariant(v, push) {
+      const next = new URL(location.href);
+      next.searchParams.set("variant", v);
+      history[push ? "pushState" : "replaceState"]({}, "", next);
+      S.variant = v;
+      S.step = 0;
+      S.cursor = 0;
+      S.filter = "";
+      S.done = null;
+      S.lastAction = "switched variant " + v;
+      render();
+    }
+
+    function dump() {
+      document.getElementById("state").textContent = JSON.stringify({
+        variant: S.variant,
+        flow: S.flow,
+        step: S.step,
+        create: S.create,
+        init: S.init,
+        done: S.done,
+        lastAction: S.lastAction,
+      }, null, 2);
+    }
+
+    function finish(msg) {
+      S.done = msg;
+      S.lastAction = "finished: " + msg;
+      document.getElementById("status-msg").textContent = msg;
+      const n = document.getElementById("notify");
+      n.hidden = false;
+      n.textContent = "✔  " + msg;
+      renderWizard();
+      dump();
+    }
+
+    function filteredKinds() {
+      const q = S.filter.toLowerCase();
+      return KINDS.filter((k) => !q || k.label.toLowerCase().includes(q) || k.id.includes(q));
+    }
+    function filteredDeps() {
+      const q = S.filter.toLowerCase();
+      return DEPS.filter((d) => !q || d.label.toLowerCase().includes(q) || d.id.includes(q));
+    }
+
+    function scaffoldPreview() {
+      const k = S.create.kind;
+      const spring = { controller: "@RestController", service: "@Service", repository: "@Repository" }[k];
+      const cls = { controller: "class", service: "class", repository: "interface", interface: "interface", record: "record", enum: "enum", class: "class" }[k];
+      const name = S.create.name || "Type";
+      const lines = [`package ${S.create.pkg};`, ""];
+      if (spring) lines.push(spring);
+      lines.push(`public ${cls} ${name} {`, "}", "");
+      return lines.join("\n");
+    }
+    function projectPreview() {
+      const a = S.init.artifact || "demo";
+      const deps = S.init.deps.join(", ") || "(none)";
+      return [
+        a + "/",
+        "  pom.xml                  maven · boot " + S.init.boot + " · java " + S.init.java,
+        "  src/main/java/" + S.init.pkg.replaceAll(".", "/") + "/",
+        "    " + titleCase(a) + "Application.java",
+        "  src/main/resources/",
+        "    application.properties",
+        "",
+        "group:     " + S.init.group,
+        "packaging: " + S.init.packaging,
+        "deps:      " + deps,
+      ].join("\n");
+    }
+    function titleCase(s) {
+      return s.replace(/(^|[-_])(\w)/g, (_, __, c) => c.toUpperCase()).replace(/[-_]/g, "");
+    }
+
+    function itemRow(opts) {
+      const { mark, label, desc, tag, on, data } = opts;
+      return `<div class="item ${on ? "on" : ""}" role="option" tabindex="0" data-pick="${data}">
+        <span class="mark">${mark || ""}</span>
+        <span>${label}${desc ? `<span class="desc">${desc}</span>` : ""}</span>
+        <span class="tag">${tag || ""}</span>
+      </div>`;
+    }
+
+    function pickerShell(title, meta, inner, footer) {
+      return `<div class="float" role="dialog" aria-label="${title}">
+        <div class="fh"><span class="title">${title}</span><span class="meta">${meta}</span></div>
+        ${inner}
+        <div class="ff">${footer}</div>
+      </div>`;
+    }
+
+    function renderA() {
+      if (S.done) return "";
+      if (S.flow === "create") {
+        if (S.step === 0) {
+          const list = filteredKinds();
+          const inner = `
+            <div class="search"><span class="prompt">󰍉</span><input id="q" placeholder="kind" value="${esc(S.filter)}" /></div>
+            <div class="items" role="listbox">
+              ${list.map((k, i) => itemRow({
+                mark: i === S.cursor ? "❯" : "",
+                label: k.label,
+                desc: k.desc,
+                tag: k.id === S.create.kind ? "selected" : "",
+                on: i === S.cursor,
+                data: k.id,
+              })).join("")}
+            </div>`;
+          return pickerShell("Create Scaffold", "step 1/2 · package com.example.demo.web", inner,
+            `<span><span class="k">↵</span> choose</span><span><span class="k">esc</span> abort</span>`);
+        }
+        const inner = `
+          <div class="search"><span class="prompt">❯</span><input id="q" placeholder="Type name" value="${esc(S.create.name)}" /></div>
+          <div class="items"><div class="item"><span></span><span>will write ${S.create.pkg.replaceAll(".", "/")}/${S.create.name || "…"}.java</span></div></div>`;
+        return pickerShell("Create Scaffold", "step 2/2 · " + S.create.kind, inner,
+          `<span><span class="k">↵</span> create</span><span><span class="k">esc</span> back</span>`);
+      }
+      // initializr sequential
+      const steps = ["boot", "java", "artifact", "deps"];
+      const labels = ["Spring Boot", "Language level", "Artifact", "Dependencies"];
+      const title = "Initializr · " + labels[S.step];
+      const meta = `step ${S.step + 1}/4 · start.spring.io`;
+      if (S.step === 0) {
+        const inner = `<div class="items">${BOOTS.map((b, i) => itemRow({
+          mark: i === S.cursor ? "❯" : "", label: b, tag: b === S.init.boot ? "default" : "", on: i === S.cursor, data: b,
+        })).join("")}</div>`;
+        return pickerShell(title, meta, inner, `<span><span class="k">↵</span> next</span>`);
+      }
+      if (S.step === 1) {
+        const inner = `<div class="items">${JAVAS.map((b, i) => itemRow({
+          mark: i === S.cursor ? "❯" : "", label: "Java " + b, tag: b === "26" ? "host jdk" : "", on: i === S.cursor, data: b,
+        })).join("")}</div>`;
+        return pickerShell(title, meta, inner, `<span><span class="k">↵</span> next</span>`);
+      }
+      if (S.step === 2) {
+        const inner = `<div class="search"><span class="prompt">❯</span><input id="q" placeholder="artifact" value="${esc(S.init.artifact)}" /></div>
+          <div class="items"><div class="item"><span></span><span>group stays ${S.init.group} · package ${S.init.pkg}</span></div></div>`;
+        return pickerShell(title, meta, inner, `<span><span class="k">↵</span> next</span>`);
+      }
+      const list = filteredDeps();
+      const inner = `
+        <div class="search"><span class="prompt">󰍉</span><input id="q" placeholder="filter dependencies" value="${esc(S.filter)}" /></div>
+        <div class="items">${list.map((d, i) => itemRow({
+          mark: S.init.deps.includes(d.id) ? "✓" : "·",
+          label: d.label, desc: d.desc,
+          on: i === S.cursor, data: d.id,
+        })).join("")}</div>`;
+      return pickerShell(title, meta, inner,
+        `<span><span class="k">space</span> toggle</span><span><span class="k">↵</span> generate</span>`);
+    }
+
+    function renderB() {
+      if (S.done) return "";
+      if (S.flow === "create") {
+        return `<div class="float form" role="dialog" aria-label="Create Scaffold">
+          <div class="fh"><span class="title">Create Scaffold</span><span class="meta">package locked from Package view</span></div>
+          <div class="form-grid">
+            <div class="col">
+              <div class="field"><label>KIND</label>
+                <div class="kinds">${KINDS.map((k) =>
+                  `<button type="button" class="kind ${S.create.kind === k.id ? "on" : ""}" data-kind="${k.id}">${k.label}<span class="desc"> ${k.desc}</span></button>`
+                ).join("")}</div>
+              </div>
+            </div>
+            <div class="col">
+              <div class="field"><label>NAME</label><div class="box"><input id="name" value="${esc(S.create.name)}" /></div></div>
+              <div class="field"><label>PACKAGE</label><div class="box"><input value="${esc(S.create.pkg)}" disabled /></div></div>
+              <div class="field"><label>PATH</label>
+                <div style="color:var(--fg-dim);font-size:12px;padding-top:4px">${S.create.pkg.replaceAll(".", "/")}/${S.create.name || "…"}.java</div>
+              </div>
+            </div>
+          </div>
+          <div class="actions"><button type="button" class="btn" data-abort>esc abort</button><button type="button" class="btn pri" data-go>Create</button></div>
+        </div>`;
+      }
+      return `<div class="float form" role="dialog" aria-label="Initializr">
+        <div class="fh"><span class="title">Initializr</span><span class="meta">https://start.spring.io · one float</span></div>
+        <div class="form-grid">
+          <div class="col">
+            <div class="field"><label>GROUP</label><div class="box"><input id="group" value="${esc(S.init.group)}" /></div></div>
+            <div class="field"><label>ARTIFACT</label><div class="box"><input id="artifact" value="${esc(S.init.artifact)}" /></div></div>
+            <div class="field"><label>PACKAGE</label><div class="box"><input id="pkg" value="${esc(S.init.pkg)}" /></div></div>
+            <div class="field"><label>BOOT</label>
+              <div class="kinds">${BOOTS.map((b) => `<button type="button" class="kind ${S.init.boot === b ? "on" : ""}" data-boot="${b}">${b}</button>`).join("")}</div>
+            </div>
+            <div class="field"><label>JAVA</label>
+              <div class="kinds" style="flex-direction:row;flex-wrap:wrap;max-height:none">${JAVAS.map((b) =>
+                `<button type="button" class="kind ${S.init.java === b ? "on" : ""}" data-java="${b}">${b}</button>`).join("")}</div>
+            </div>
+          </div>
+          <div class="col">
+            <div class="field"><label>DEPENDENCIES</label>
+              <div class="search" style="margin:0 0 6px"><span class="prompt">󰍉</span><input id="q" placeholder="filter" value="${esc(S.filter)}" /></div>
+              <div class="deps">${filteredDeps().map((d) =>
+                `<div class="dep ${S.init.deps.includes(d.id) ? "on" : ""}" data-dep="${d.id}">
+                  <span class="boxx">${S.init.deps.includes(d.id) ? "☑" : "☐"}</span>
+                  <span>${d.label}<span class="desc"> — ${d.desc}</span></span>
+                </div>`).join("")}</div>
+            </div>
+          </div>
+        </div>
+        <div class="actions"><button type="button" class="btn" data-abort>esc abort</button><button type="button" class="btn pri" data-go>Generate</button></div>
+      </div>`;
+    }
+
+    function renderC() {
+      if (S.done) return "";
+      const createSteps = ["Kind", "Name"];
+      const initSteps = ["Identity", "Platform", "Dependencies"];
+      const labels = S.flow === "create" ? createSteps : initSteps;
+      const steps = `<div class="steps">${labels.map((l, i) =>
+        `<span class="s ${i === S.step ? "on" : ""} ${i < S.step ? "done" : ""}">${i + 1} ${l}</span>`).join("<span>·</span>")}</div>`;
+      let right = "";
+      if (S.flow === "create" && S.step === 0) {
+        right = `<div class="items">${KINDS.map((k, i) => itemRow({
+          mark: i === S.cursor ? "❯" : "", label: k.label, desc: k.desc, on: i === S.cursor, data: k.id,
+        })).join("")}</div>`;
+      } else if (S.flow === "create") {
+        right = `<div class="search"><span class="prompt">❯</span><input id="q" value="${esc(S.create.name)}" /></div>
+          <div class="ff" style="border:0">Package is taken from the Package view, not asked again.</div>`;
+      } else if (S.step === 0) {
+        right = `<div class="col">
+          <div class="field"><label>GROUP</label><div class="box"><input id="group" value="${esc(S.init.group)}" /></div></div>
+          <div class="field"><label>ARTIFACT</label><div class="box"><input id="artifact" value="${esc(S.init.artifact)}" /></div></div>
+          <div class="field"><label>PACKAGE</label><div class="box"><input id="pkg" value="${esc(S.init.pkg)}" /></div></div>
+        </div>`;
+      } else if (S.step === 1) {
+        right = `<div class="col">
+          <div class="field"><label>BOOT</label><div class="kinds">${BOOTS.map((b, i) =>
+            `<button type="button" class="kind ${S.init.boot === b ? "on" : ""}" data-boot="${b}">${b}</button>`).join("")}</div></div>
+          <div class="field"><label>JAVA</label><div class="kinds" style="flex-direction:row;flex-wrap:wrap;max-height:none">${JAVAS.map((b) =>
+            `<button type="button" class="kind ${S.init.java === b ? "on" : ""}" data-java="${b}">${b}</button>`).join("")}</div></div>
+        </div>`;
+      } else {
+        right = `<div class="deps" style="margin:10px 12px">${DEPS.map((d) =>
+          `<div class="dep ${S.init.deps.includes(d.id) ? "on" : ""}" data-dep="${d.id}">
+            <span class="boxx">${S.init.deps.includes(d.id) ? "☑" : "☐"}</span>
+            <span>${d.label}<span class="desc"> — ${d.desc}</span></span>
+          </div>`).join("")}</div>`;
+      }
+      const preview = S.flow === "create" ? scaffoldPreview() : projectPreview();
+      const last = S.step === labels.length - 1;
+      return `<div class="float wide" role="dialog" aria-label="Wizard">
+        <div class="fh"><span class="title">${S.flow === "create" ? "Create Scaffold" : "Initializr"}</span>
+          <span class="meta">${S.flow === "create" ? "from Package view · web" : "start.spring.io"}</span></div>
+        ${steps}
+        <div class="split">
+          <div class="preview"><div class="ph">LIVE PREVIEW</div><pre>${esc(preview)}</pre></div>
+          <div>${right}</div>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn" data-back ${S.step === 0 ? "disabled" : ""}>back</button>
+          <button type="button" class="btn pri" data-go>${last ? (S.flow === "create" ? "Create" : "Generate") : "Next"}</button>
+        </div>
+      </div>`;
+    }
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    function renderWizard() {
+      const scrim = document.getElementById("scrim");
+      if (S.done) { scrim.hidden = true; scrim.innerHTML = ""; return; }
+      scrim.hidden = false;
+      scrim.innerHTML = S.variant === "A" ? renderA() : S.variant === "B" ? renderB() : renderC();
+      const q = document.getElementById("q") || document.getElementById("name") || document.getElementById("artifact") || document.getElementById("group");
+      if (q && document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement === document.body)) {
+        /* keep focus if already in an input; otherwise leave it so arrows still cycle variants */
+      }
+    }
+
+    function renderSwitcher() {
+      const m = VARIANT_META[S.variant];
+      document.getElementById("switcher-lab").innerHTML = `${S.variant} — ${m.name}<span class="sub">${m.blurb}</span>`;
+      document.querySelectorAll("[data-flow]").forEach((el) => {
+        el.setAttribute("aria-pressed", el.dataset.flow === S.flow ? "true" : "false");
+      });
+    }
+
+    function render() {
+      document.getElementById("notify").hidden = !S.done;
+      if (S.done) document.getElementById("notify").textContent = "✔  " + S.done;
+      renderSwitcher();
+      renderWizard();
+      dump();
+    }
+
+    function cycle(dir) {
+      const i = KEYS.indexOf(S.variant);
+      setVariant(KEYS[(i + dir + KEYS.length) % KEYS.length], true);
+    }
+
+    function pickCreateKind(id) {
+      S.create.kind = id;
+      S.lastAction = "kind=" + id;
+      if (S.variant === "A" || (S.variant === "C" && S.flow === "create" && S.step === 0)) {
+        S.step = 1;
+        S.cursor = 0;
+        S.filter = "";
+      }
+      render();
+    }
+
+    function toggleDep(id) {
+      const i = S.init.deps.indexOf(id);
+      if (i >= 0) S.init.deps.splice(i, 1); else S.init.deps.push(id);
+      S.lastAction = "deps=" + S.init.deps.join(",");
+      render();
+    }
+
+    function submitCreate() {
+      const name = S.create.name.trim();
+      if (!name) return;
+      finish(`created ${S.create.pkg}.${name} (${S.create.kind})`);
+    }
+    function submitInit() {
+      finish(`generated ${S.init.artifact} · boot ${S.init.boot} · java ${S.init.java} · ${S.init.deps.join("+") || "no deps"}`);
+    }
+
+    function nextA() {
+      if (S.flow === "create") {
+        if (S.step === 0) {
+          const list = filteredKinds();
+          if (list[S.cursor]) pickCreateKind(list[S.cursor].id);
+          return;
+        }
+        const inp = document.getElementById("q");
+        if (inp) S.create.name = inp.value;
+        submitCreate();
+        return;
+      }
+      if (S.step === 0) { S.init.boot = BOOTS[S.cursor] || S.init.boot; S.step = 1; S.cursor = 0; S.lastAction = "boot=" + S.init.boot; render(); return; }
+      if (S.step === 1) { S.init.java = JAVAS[S.cursor] || S.init.java; S.step = 2; S.cursor = 0; S.lastAction = "java=" + S.init.java; render(); return; }
+      if (S.step === 2) {
+        const inp = document.getElementById("q");
+        if (inp) {
+          S.init.artifact = inp.value || S.init.artifact;
+          S.init.name = S.init.artifact;
+        }
+        S.step = 3; S.cursor = 0; S.filter = ""; S.lastAction = "artifact=" + S.init.artifact; render(); return;
+      }
+      submitInit();
+    }
+
+    function nextC() {
+      const last = S.flow === "create" ? 1 : 2;
+      if (S.flow === "create" && S.step === 0) {
+        const k = KINDS[S.cursor];
+        if (k) S.create.kind = k.id;
+        S.step = 1; S.lastAction = "kind=" + S.create.kind; render(); return;
+      }
+      if (S.flow === "create" && S.step === 1) {
+        const inp = document.getElementById("q");
+        if (inp) S.create.name = inp.value;
+        submitCreate(); return;
+      }
+      if (S.step < last) {
+        ["group", "artifact", "pkg"].forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) S.init[id === "pkg" ? "pkg" : id] = el.value;
+        });
+        S.step += 1; S.lastAction = "next step " + S.step; render(); return;
+      }
+      submitInit();
+    }
+
+    document.getElementById("prev").addEventListener("click", () => cycle(-1));
+    document.getElementById("next").addEventListener("click", () => cycle(1));
+    document.getElementById("reset").addEventListener("click", () => {
+      const v = S.variant, f = S.flow;
+      S = defaultState();
+      S.variant = v; S.flow = f;
+      S.lastAction = "reset";
+      render();
+    });
+    document.querySelectorAll("[data-flow]").forEach((el) => {
+      el.addEventListener("click", () => {
+        S.flow = el.dataset.flow;
+        S.step = 0; S.cursor = 0; S.filter = ""; S.done = null;
+        S.lastAction = "flow=" + S.flow;
+        render();
+      });
+    });
+
+    document.getElementById("scrim").addEventListener("click", (e) => {
+      const pick = e.target.closest("[data-pick]");
+      if (pick) {
+        const id = pick.dataset.pick;
+        if (S.flow === "create") pickCreateKind(id);
+        else if (S.variant === "A" && S.step === 0) { S.init.boot = id; S.step = 1; S.cursor = 0; S.lastAction = "boot=" + id; render(); }
+        else if (S.variant === "A" && S.step === 1) { S.init.java = id; S.step = 2; S.cursor = 0; S.lastAction = "java=" + id; render(); }
+        else if (S.variant === "A" && S.step === 3) toggleDep(id);
+        else if (S.variant === "C" && S.flow === "create") pickCreateKind(id);
+        return;
+      }
+      const kind = e.target.closest("[data-kind]");
+      if (kind) { pickCreateKind(kind.dataset.kind); return; }
+      const boot = e.target.closest("[data-boot]");
+      if (boot) { S.init.boot = boot.dataset.boot; S.lastAction = "boot=" + S.init.boot; render(); return; }
+      const java = e.target.closest("[data-java]");
+      if (java) { S.init.java = java.dataset.java; S.lastAction = "java=" + S.init.java; render(); return; }
+      const dep = e.target.closest("[data-dep]");
+      if (dep) { toggleDep(dep.dataset.dep); return; }
+      if (e.target.closest("[data-go]")) {
+        if (S.variant === "A") nextA();
+        else if (S.variant === "B") {
+          const name = document.getElementById("name");
+          const artifact = document.getElementById("artifact");
+          const group = document.getElementById("group");
+          const pkg = document.getElementById("pkg");
+          if (name) S.create.name = name.value;
+          if (group) S.init.group = group.value;
+          if (artifact) S.init.artifact = artifact.value;
+          if (pkg) S.init.pkg = pkg.value;
+          S.flow === "create" ? submitCreate() : submitInit();
+        } else nextC();
+        return;
+      }
+      if (e.target.closest("[data-back]")) {
+        S.step = Math.max(0, S.step - 1); S.lastAction = "back"; render(); return;
+      }
+      if (e.target.closest("[data-abort]")) {
+        S.done = "aborted"; S.lastAction = "abort"; render();
+      }
+    });
+
+    document.getElementById("scrim").addEventListener("input", (e) => {
+      if (e.target.id === "q") {
+        if (S.variant === "A" && S.flow === "create" && S.step === 0) { S.filter = e.target.value; S.cursor = 0; renderWizard(); dump(); e.target.focus(); const el = document.getElementById("q"); if (el) el.setSelectionRange(S.filter.length, S.filter.length); }
+        else if (S.variant === "A" && S.flow === "create" && S.step === 1) { S.create.name = e.target.value; dump(); }
+        else if (S.variant === "A" && S.flow === "initializr" && S.step === 2) { S.init.artifact = e.target.value; dump(); }
+        else if (S.variant === "A" && S.flow === "initializr" && S.step === 3) { S.filter = e.target.value; renderWizard(); dump(); e.target.focus(); }
+        else if (S.variant === "C" && S.flow === "create" && S.step === 1) { S.create.name = e.target.value; renderWizard(); dump(); e.target.focus(); }
+        else if (S.variant === "B" && S.flow === "initializr") { S.filter = e.target.value; const pos = e.target.selectionStart; renderWizard(); const nq = document.getElementById("q"); if (nq) { nq.focus(); nq.setSelectionRange(pos, pos); } dump(); }
+      }
+      if (e.target.id === "name") { S.create.name = e.target.value; dump(); }
+      if (e.target.id === "group") { S.init.group = e.target.value; dump(); }
+      if (e.target.id === "artifact") { S.init.artifact = e.target.value; dump(); }
+      if (e.target.id === "pkg") { S.init.pkg = e.target.value; dump(); }
+    });
+
+    window.addEventListener("keydown", (e) => {
+      const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName) || document.activeElement.isContentEditable;
+      if (!typing && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        e.preventDefault();
+        cycle(e.key === "ArrowRight" ? 1 : -1);
+        return;
+      }
+      if (e.key === "Escape") {
+        if (S.variant === "A" && S.step > 0 && !S.done) { S.step -= 1; S.filter = ""; S.lastAction = "esc back"; render(); return; }
+        if (!S.done) { S.done = "aborted"; S.lastAction = "esc abort"; render(); }
+        return;
+      }
+      if (S.done) return;
+      if (e.key === "Enter" && S.variant === "A") { e.preventDefault(); nextA(); return; }
+      if (e.key === "Enter" && S.variant === "C" && !e.repeat) {
+        if (typing && S.flow === "create" && S.step === 1) { e.preventDefault(); nextC(); }
+        return;
+      }
+      if (e.key === " " && S.variant === "A" && S.flow === "initializr" && S.step === 3 && !typing) {
+        e.preventDefault();
+        const d = filteredDeps()[S.cursor];
+        if (d) toggleDep(d.id);
+        return;
+      }
+      if (!typing && (e.key === "j" || e.key === "k" || e.key === "ArrowDown" || e.key === "ArrowUp")) {
+        const dir = (e.key === "j" || e.key === "ArrowDown") ? 1 : -1;
+        let len = 0;
+        if (S.variant === "A" && S.flow === "create" && S.step === 0) len = filteredKinds().length;
+        else if (S.variant === "A" && S.flow === "initializr" && S.step === 0) len = BOOTS.length;
+        else if (S.variant === "A" && S.flow === "initializr" && S.step === 1) len = JAVAS.length;
+        else if (S.variant === "A" && S.flow === "initializr" && S.step === 3) len = filteredDeps().length;
+        else if (S.variant === "C" && S.flow === "create" && S.step === 0) len = KINDS.length;
+        if (len) { S.cursor = (S.cursor + dir + len) % len; render(); }
+      }
+    });
+
+    window.addEventListener("popstate", () => { S.variant = readVariant(); S.step = 0; S.done = null; render(); });
+
+    S.variant = readVariant();
+    const url = new URL(location.href);
+    if (!url.searchParams.get("variant")) {
+      url.searchParams.set("variant", "A");
+      history.replaceState({}, "", url);
+    }
+    render();
+  </script>
+</body>
+</html>
