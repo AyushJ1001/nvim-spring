@@ -41,6 +41,8 @@ require("nvim-spring").setup({
 
 Recommended maps (not a frozen chord contract): `<leader>si`, `<leader>sc`, `<leader>sp`, `<leader>sa`, `<leader>sr`, `<leader>ss`.
 
+On an unresolved type in a Java buffer (jdtls `UNDEFINED_TYPE` / `UNDEFINED_NAME`), a type-local code action offers to add a **Dependency**. It uses the same find/write/reload path as `:SpringAddDependency` and also writes the import / simple name. With no jdtls client the offer is absent. Init, run, and **Package view** are not code actions.
+
 ## Run and Reload
 
 `:SpringRun` starts vanilla `spring-boot:run` in a Plugin-owned terminal buffer. It prefers `./mvnw` when a wrapper exists, otherwise `mvn`. There is no profile picker, no extra-args UI, no exploded-`java` launcher, and no `java -jar` Reload path. Missing `mvnw` and `mvn` is a loud-refuse.
