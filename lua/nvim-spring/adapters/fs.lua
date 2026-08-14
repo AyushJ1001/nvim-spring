@@ -28,6 +28,34 @@ function M:exists(path)
   return stat ~= nil
 end
 
+function M:is_dir(path)
+  path = resolve(self, path)
+  local stat = vim.uv and vim.uv.fs_stat(path) or (vim.loop and vim.loop.fs_stat(path))
+  return stat ~= nil and stat.type == "directory"
+end
+
+function M:list(path)
+  path = resolve(self, path)
+  local uv = vim.uv or vim.loop
+  if not uv or not uv.fs_scandir then
+    return {}
+  end
+  local handle = uv.fs_scandir(path)
+  if not handle then
+    return {}
+  end
+  local names = {}
+  while true do
+    local name = uv.fs_scandir_next(handle)
+    if not name then
+      break
+    end
+    names[#names + 1] = name
+  end
+  table.sort(names)
+  return names
+end
+
 function M:write(path, content)
   path = resolve(self, path)
   local f, err = io.open(path, "w")

@@ -1,4 +1,5 @@
 local workspace = require("nvim-spring.workspace")
+local package_view = require("nvim-spring.package_view")
 
 local Actions = {}
 Actions.__index = Actions
@@ -85,7 +86,10 @@ function Actions:create()
 end
 
 function Actions:packages()
-  self:_gate()
+  if not self:_gate() then
+    return
+  end
+  self.ui:package_view(package_view.build(self.fs, self.jdtls))
 end
 
 function Actions:add_dependency()
