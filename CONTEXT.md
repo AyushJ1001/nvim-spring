@@ -12,6 +12,10 @@ _Avoid_: overlay, extra, distribution (when meaning the product)
 A program that must exist on the machine outside Neovim.
 _Avoid_: system dependency, runtime (when meaning a PATH binary)
 
+**Language level**:
+The project's Java release (`maven.compiler.release` / `java.version`), not the **Host tool** JDK on PATH.
+_Avoid_: Java version (when it is unclear which of the two is meant), JDK version (when meaning the project)
+
 **Build tool**:
 The project's Maven or Gradle system. It owns the build file, where a **Dependency** is declared, and the source roots and compile output a **Package view** and reload use.
 _Avoid_: build system, compiler (when meaning Maven or Gradle)
