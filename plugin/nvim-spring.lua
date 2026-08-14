@@ -13,9 +13,18 @@ local commands = {
 }
 
 for name, method in pairs(commands) do
-  vim.api.nvim_create_user_command(name, function()
-    require("nvim-spring")[method]()
-  end, {})
+  local opts = {}
+  if name == "SpringAddDependency" then
+    opts.nargs = "?"
+  end
+  vim.api.nvim_create_user_command(name, function(cmd)
+    local fn = require("nvim-spring")[method]
+    if cmd.args and cmd.args ~= "" then
+      fn(cmd.args)
+    else
+      fn()
+    end
+  end, opts)
 end
 
 -- Let lang.java / the user's nvim-jdtls config start first; fill in only if none is up.
