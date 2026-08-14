@@ -22,6 +22,7 @@ function Actions.new(adapters)
   self.ui = adapters.ui
   self.jdtls = adapters.jdtls
   self.central = adapters.central
+  self.host = adapters.host
   self.opts = adapters.opts or {}
   return self
 end
@@ -63,9 +64,57 @@ function Actions:_bind_keymaps()
   end
 end
 
+function Actions:_in_contract()
+  local verdict = workspace.classify(self.fs)
+  return not verdict.refuse
+end
+
+function Actions:_resource_rel(path)
+  return path:match("src/main/resources/(.+)$")
+end
+
+function Actions:_copy_resource(path, rel)
+  local content = self.fs:read(path)
+  if not content then
+    return
+  end
+  local dest = "target/classes/" .. rel
+  local dir = dest:match("(.+)/[^/]+$")
+  if dir and self.fs.mkdir then
+    self.fs:mkdir(dir)
+  end
+  self.fs:write(dest, content)
+end
+
+function Actions:_compile_incremental()
+  if self.jdtls and self.jdtls.compile then
+    self.jdtls:compile("incremental")
+  end
+end
+
+function Actions:_on_write(path)
+  if not path or not self:_in_contract() or not workspace.is_spring_boot(self.fs) then
+    return
+  end
+  if path:match("%.java$") then
+    self:_compile_incremental()
+    return
+  end
+  local rel = self:_resource_rel(path)
+  if rel then
+    self:_copy_resource(path, rel)
+    self:_compile_incremental()
+  end
+end
+
 function Actions:setup(opts)
   self:_merge_opts(opts)
   self:_bind_keymaps()
+  if self.ui and self.ui.on_write then
+    self.ui:on_write(function(path)
+      self:_on_write(path)
+    end)
+  end
 end
 
 function Actions:ensure_jdtls()
@@ -169,10 +218,11 @@ function Actions:_reload_project()
   end
 end
 
-function Actions:add_dependency(query)
+function Actions:add_dependency(query, opts)
   if not self:_gate() then
     return
   end
+  opts = opts or {}
   query = query and query:match("^%s*(.-)%s*$") or ""
   if query == "" then
     if self.ui.input then
@@ -212,7 +262,7 @@ function Actions:add_dependency(query)
     if not dependency.has_gav(pom, hit.g, hit.a) then
       local omit_version = dependency.is_managed(pom, hit.g, hit.a, self.central)
       local scope
-      if self.ui.current_file then
+      if not opts.ignore_buffer and self.ui.current_file then
         scope = dependency.test_scope(self.ui:current_file())
       end
       local next_pom = dependency.insert(pom, hit, {
@@ -237,12 +287,67 @@ function Actions:add_dependency(query)
   end
 end
 
+function Actions:_maven_run_argv()
+  if self.fs:exists("mvnw") then
+    return { "./mvnw", "spring-boot:run" }
+  end
+  if self.host and self.host.has and self.host:has("mvn") then
+    return { "mvn", "spring-boot:run" }
+  end
+  return nil
+end
+
+function Actions:_has_devtools(pom)
+  if not pom or not dependency.has_gav(pom, "org.springframework.boot", "spring-boot-devtools") then
+    return false
+  end
+  for dep in pom:gmatch("<dependency[^>]*>(.-)</dependency>") do
+    if
+      dep:find("<groupId>%s*org%.springframework%.boot%s*</groupId>")
+      and dep:find("<artifactId>%s*spring%-boot%-devtools%s*</artifactId>")
+      and not dep:find("<scope>%s*test%s*</scope>")
+    then
+      return true
+    end
+  end
+  return false
+end
+
 function Actions:run()
-  self:_gate()
+  if not self:_gate() then
+    return
+  end
+  if not workspace.is_spring_boot(self.fs) then
+    self.ui:notify("Not a Spring Boot project.")
+    return
+  end
+  local argv = self:_maven_run_argv()
+  if not argv or not self.host or not self.host.start then
+    self.ui:notify("Neither mvnw nor mvn is available.")
+    return
+  end
+  if self._boot_process then
+    self.ui:notify("Spring Boot is already running.")
+    return
+  end
+  self._boot_process = self.host:start(argv, { cwd = self.fs:cwd() })
+  local pom = self.fs:read("pom.xml")
+  if not self:_has_devtools(pom) then
+    self.ui:notify("Reload will not happen without spring-boot-devtools.")
+    if self.ui.confirm and self.ui:confirm("Add spring-boot-devtools so Reload can happen?") then
+      self:add_dependency("org.springframework.boot:spring-boot-devtools", { ignore_buffer = true })
+    end
+  end
 end
 
 function Actions:stop()
-  self:_gate()
+  if not self:_gate() then
+    return
+  end
+  if self._boot_process and self.host and self.host.stop then
+    self.host:stop(self._boot_process)
+    self._boot_process = nil
+  end
 end
 
 return Actions

@@ -76,6 +76,8 @@ function fakes.fs(opts)
     return names
   end
 
+  function fs:mkdir() end
+
   function fs:write(path, content)
     local full = join(root, path)
     files[full] = content
@@ -97,7 +99,11 @@ function fakes.ui(opts)
     pick_items = nil,
     pick_choice = opts.pick_choice,
     input_text = opts.input_text,
+    confirm_result = opts.confirm,
     file = opts.file,
+    confirm_calls = 0,
+    last_confirm = nil,
+    write_handler = nil,
     selection = opts.selection,
     wizard_answers = opts.wizard_answers,
     notify = function(self, message, level)
@@ -133,6 +139,19 @@ function fakes.ui(opts)
     current_file = function(self)
       return self.file
     end,
+    confirm = function(self, message)
+      self.confirm_calls = self.confirm_calls + 1
+      self.last_confirm = message
+      return self.confirm_result == true
+    end,
+    on_write = function(self, cb)
+      self.write_handler = cb
+    end,
+    fire_write = function(self, path)
+      if self.write_handler then
+        self.write_handler(path)
+      end
+    end,
     package_view_selection = function(self)
       return self.selection
     end,
@@ -162,6 +181,8 @@ function fakes.jdtls(opts)
     starts = 0,
     stops = 0,
     refreshes = 0,
+    compiles = 0,
+    last_compile = nil,
     list_source_path_calls = 0,
     is_present = function(self)
       return self.present
@@ -183,6 +204,10 @@ function fakes.jdtls(opts)
     list_source_paths = function(self)
       self.list_source_path_calls = self.list_source_path_calls + 1
       return self.source_paths
+    end,
+    compile = function(self, kind)
+      self.compiles = self.compiles + 1
+      self.last_compile = kind
     end,
   }
 end
@@ -223,21 +248,60 @@ function fakes.central(opts)
   return central
 end
 
+function fakes.host(opts)
+  opts = opts or {}
+  local bins = opts.bins or { mvn = true }
+  local host = {
+    bins = bins,
+    starts = {},
+    stops = {},
+    running = {},
+    next_id = 1,
+  }
+
+  function host:has(bin)
+    return self.bins[bin] == true
+  end
+
+  function host:start(argv, start_opts)
+    local handle = {
+      id = self.next_id,
+      argv = argv,
+      opts = start_opts,
+    }
+    self.next_id = self.next_id + 1
+    self.starts[#self.starts + 1] = handle
+    self.running[handle.id] = handle
+    return handle
+  end
+
+  function host:stop(handle)
+    self.stops[#self.stops + 1] = handle
+    if handle and handle.id then
+      self.running[handle.id] = nil
+    end
+  end
+
+  return host
+end
+
 function fakes.plugin(opts)
   opts = opts or {}
   local ui = opts.ui or fakes.ui(opts)
   local jdtls = opts.jdtls or fakes.jdtls({ running = true, present = true })
   local fs = opts.fs or fakes.fs(opts)
   local central = opts.central or fakes.central()
+  local host = opts.host or fakes.host()
   local actions = require("nvim-spring.actions")
   local plugin = actions.new({
     fs = fs,
     ui = ui,
     jdtls = jdtls,
     central = central,
+    host = host,
     opts = opts.opts,
   })
-  return plugin, { fs = fs, ui = ui, jdtls = jdtls, central = central }
+  return plugin, { fs = fs, ui = ui, jdtls = jdtls, central = central, host = host }
 end
 
 function fakes.notify_text(ui)
