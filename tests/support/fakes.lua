@@ -1,15 +1,10 @@
 -- Test-only adapters. Not a product seam.
 
+local pathutil = require("nvim-spring.path")
 local fakes = {}
 
 local function join(root, rel)
-  if not rel or rel == "" then
-    return root
-  end
-  if rel:sub(1, 1) == "/" then
-    return rel
-  end
-  return root .. "/" .. rel
+  return pathutil.join(root, rel)
 end
 
 function fakes.fs(opts)

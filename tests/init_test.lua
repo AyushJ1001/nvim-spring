@@ -343,6 +343,26 @@ return {
     end,
   },
   {
+    "Windows drive-letter cwd is not prepended again when generating",
+    function()
+      local plugin, adapters = fakes.plugin({
+        root = "C:\\work",
+        http = fakes.http({
+          body = fakes.initializr_metadata(),
+          archive = {
+            ["pom.xml"] = POM,
+          },
+        }),
+        host = fakes.host({ jdk_major = 21 }),
+      })
+      plugin:setup({})
+      plugin:init()
+      assert_eq(adapters.ui.opened, "C:\\work\\demo")
+      assert_eq(adapters.fs:read("demo/pom.xml"), POM)
+      assert_not_contains(adapters.ui.opened, "C:\\work\\C:")
+    end,
+  },
+  {
     "Missing cwd loud-refuses and does not download starter.zip",
     function()
       local plugin, adapters = happy_plugin({ jdk_major = 21 })

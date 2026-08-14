@@ -3,6 +3,7 @@ local package_view = require("nvim-spring.package_view")
 local dependency = require("nvim-spring.dependency")
 local scaffold = require("nvim-spring.scaffold")
 local initializr = require("nvim-spring.initializr")
+local pathutil = require("nvim-spring.path")
 
 local Actions = {}
 Actions.__index = Actions
@@ -164,13 +165,7 @@ function Actions:_host_jdk_major()
 end
 
 function Actions:_join(root, rel)
-  if not rel or rel == "" then
-    return root
-  end
-  if rel:sub(1, 1) == "/" then
-    return rel
-  end
-  return root .. "/" .. rel
+  return pathutil.join(root, rel)
 end
 
 function Actions:_generate(meta, answers)

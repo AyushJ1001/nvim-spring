@@ -171,11 +171,25 @@ function M.run(spec, on_done)
     end
   end
 
+  local function sync_cursor_to_answer()
+    local field = current_field()
+    if not field or field_type(field) ~= "select" then
+      return
+    end
+    for i, value in ipairs(listed_values(field)) do
+      if field_id(value) == answers[field.name] then
+        cursor = i
+        return
+      end
+    end
+  end
+
   local function render()
     if not vim.api.nvim_buf_is_valid(buf) then
       return
     end
     local current = step()
+    sync_cursor_to_answer()
     local field = current_field()
     local lines = {}
     local meta = (spec.source or "") .. " · step " .. step_i .. "/" .. #spec.steps
@@ -414,7 +428,7 @@ function M.run(spec, on_done)
     local fields = step().fields or {}
     if #fields > 1 then
       field_i = math.max(1, field_i - 1)
-      cursor = 1
+      sync_cursor_to_answer()
       render()
     end
   end)
@@ -422,7 +436,7 @@ function M.run(spec, on_done)
     local fields = step().fields or {}
     if #fields > 1 then
       field_i = math.min(#fields, field_i + 1)
-      cursor = 1
+      sync_cursor_to_answer()
       render()
     end
   end)
@@ -435,7 +449,7 @@ function M.run(spec, on_done)
     if field_i > #fields then
       field_i = 1
     end
-    cursor = 1
+    sync_cursor_to_answer()
     render()
   end)
   map("<Down>", function()

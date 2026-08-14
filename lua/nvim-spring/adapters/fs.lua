@@ -1,10 +1,12 @@
+local pathutil = require("nvim-spring.path")
+
 local M = {}
 
 local function resolve(self, path)
-  if path:sub(1, 1) == "/" then
+  if pathutil.is_absolute(path) then
     return path
   end
-  return self:cwd() .. "/" .. path
+  return pathutil.join(self:cwd(), path)
 end
 
 function M:cwd()
