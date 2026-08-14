@@ -91,11 +91,15 @@ function fakes.ui(opts)
     notifications = {},
     keymaps = {},
     package_views = {},
+    wizards = {},
+    opened = nil,
     pick_calls = 0,
     pick_items = nil,
     pick_choice = opts.pick_choice,
     input_text = opts.input_text,
     file = opts.file,
+    selection = opts.selection,
+    wizard_answers = opts.wizard_answers,
     notify = function(self, message, level)
       self.notifications[#self.notifications + 1] = {
         message = message,
@@ -128,6 +132,23 @@ function fakes.ui(opts)
     end,
     current_file = function(self)
       return self.file
+    end,
+    package_view_selection = function(self)
+      return self.selection
+    end,
+    wizard = function(self, spec, cb)
+      self.wizards[#self.wizards + 1] = spec
+      local answers = self.wizard_answers
+      if type(answers) == "function" then
+        answers = answers(spec)
+      end
+      if cb then
+        cb(answers)
+      end
+      return answers
+    end,
+    open_file = function(self, path)
+      self.opened = path
     end,
   }
 end

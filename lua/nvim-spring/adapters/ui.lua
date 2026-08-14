@@ -20,21 +20,25 @@ end
 
 local function render_package_view(model)
   local lines = { model.name or "project" }
+  local nodes = { false }
   if not model.roots or #model.roots == 0 then
     lines[#lines + 1] = "  (no source roots)"
-    return lines
+    nodes[#nodes + 1] = false
+    return lines, nodes
   end
   for _, root in ipairs(model.roots) do
     lines[#lines + 1] = "  " .. root.path
+    nodes[#nodes + 1] = { root = root.path, package = "" }
     for _, pkg in ipairs(root.packages or {}) do
       local label = pkg
       if label == "" then
         label = "(default package)"
       end
       lines[#lines + 1] = "    " .. label
+      nodes[#nodes + 1] = { root = root.path, package = pkg }
     end
   end
-  return lines
+  return lines, nodes
 end
 
 local function show_package_view(bufnr)
@@ -69,11 +73,42 @@ function M:package_view(model)
       desc = "Close Package view",
     })
   end
+  local lines, nodes = render_package_view(model or {})
   vim.bo[bufnr].modifiable = true
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, render_package_view(model or {}))
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
   vim.bo[bufnr].modifiable = false
   vim.bo[bufnr].modified = false
+  vim.b[bufnr].spring_nodes = nodes
   show_package_view(bufnr)
+end
+
+function M:package_view_selection()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if vim.bo[bufnr].filetype ~= PACKAGE_VIEW_FT then
+    return nil
+  end
+  local nodes = vim.b[bufnr].spring_nodes
+  if not nodes then
+    return nil
+  end
+  local line = vim.api.nvim_win_get_cursor(0)[1]
+  local node = nodes[line]
+  if node then
+    return node
+  end
+  for _, entry in ipairs(nodes) do
+    if entry then
+      return entry
+    end
+  end
+end
+
+function M:wizard(spec, on_done)
+  return require("nvim-spring.adapters.wizard").run(spec, on_done)
+end
+
+function M:open_file(path)
+  vim.cmd.edit(vim.fn.fnameescape(path))
 end
 
 function M:input(prompt)

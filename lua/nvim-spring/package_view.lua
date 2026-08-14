@@ -140,6 +140,10 @@ local function jdtls_roots(fs, jdtls)
   return roots
 end
 
+function M.relative(fs, path)
+  return relative_to_workspace(fs, path)
+end
+
 function M.build(fs, jdtls)
   return {
     name = project_name(fs),
