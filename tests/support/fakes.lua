@@ -129,6 +129,10 @@ function fakes.ui(opts)
     current_file = function(self)
       return self.file
     end,
+    read_buffer = opts.buffer and function(self)
+      return self.buffer
+    end or nil,
+    buffer = opts.buffer,
   }
 end
 
@@ -138,6 +142,7 @@ function fakes.jdtls(opts)
     present = opts.present ~= false,
     running = opts.running == true,
     source_paths = opts.source_paths,
+    diagnostic_list = opts.diagnostics or {},
     starts = 0,
     stops = 0,
     refreshes = 0,
@@ -162,6 +167,15 @@ function fakes.jdtls(opts)
     list_source_paths = function(self)
       self.list_source_path_calls = self.list_source_path_calls + 1
       return self.source_paths
+    end,
+    diagnostics = function(self, path)
+      local out = {}
+      for _, d in ipairs(self.diagnostic_list) do
+        if not path or not d.file or d.file == path then
+          out[#out + 1] = d
+        end
+      end
+      return out
     end,
   }
 end

@@ -28,6 +28,43 @@ local function each_existing_project_action(plugin)
   end
 end
 
+local JAVA_PATH = "/workspace/src/main/java/com/example/App.java"
+
+local FQCN_JAVA = [[
+package com.example;
+
+public class App {
+  com.google.common.collect.ImmutableList<String> xs;
+}
+]]
+
+local FQCN_DIAG = {
+  file = JAVA_PATH,
+  code = 16777218,
+  lnum = 3,
+  col = 2,
+  end_lnum = 3,
+  end_col = 41,
+}
+
+local function type_local_plugin(opts)
+  opts = opts or {}
+  local files = opts.files or {
+    ["pom.xml"] = IN_CONTRACT_POM,
+    ["src/main/java/com/example/App.java"] = opts.java or FQCN_JAVA,
+  }
+  return fakes.plugin({
+    files = files,
+    ui = opts.ui or fakes.ui({ file = opts.file or JAVA_PATH }),
+    jdtls = opts.jdtls or fakes.jdtls({
+      present = opts.present ~= false,
+      running = opts.running ~= false,
+      diagnostics = opts.diagnostics or { FQCN_DIAG },
+    }),
+    central = opts.central,
+  })
+end
+
 return {
   {
     "Plugin action module requires without lazyvim or lang.java",
@@ -937,6 +974,274 @@ return {
       local deps = adapters.fs:read("pom.xml"):match("</dependencyManagement>.-<dependencies>(.-)</dependencies>")
       assert_contains(deps, "<artifactId>lib</artifactId>")
       assert_not_contains(deps, "<version>")
+    end,
+  },
+  {
+    "type-local add-Dependency code action appears on UNDEFINED_TYPE when jdtls is up",
+    function()
+      local plugin = type_local_plugin()
+      local offered = plugin:code_actions()
+      assert_eq(#offered, 1)
+      assert_contains(offered[1].title, "ImmutableList")
+      assert_eq(offered[1].query, "com.google.common.collect.ImmutableList")
+    end,
+  },
+  {
+    "type-local add-Dependency is absent without a jdtls client",
+    function()
+      local plugin = type_local_plugin({ present = true, running = false })
+      assert_eq(#plugin:code_actions(), 0)
+    end,
+  },
+  {
+    "type-local add-Dependency is absent when nvim-jdtls is missing",
+    function()
+      local plugin = type_local_plugin({ present = false, running = false })
+      assert_eq(#plugin:code_actions(), 0)
+    end,
+  },
+  {
+    "type-local add-Dependency appears when a jdtls client is up without nvim-jdtls",
+    function()
+      local plugin = type_local_plugin({ present = false, running = true })
+      assert_eq(#plugin:code_actions(), 1)
+    end,
+  },
+  {
+    "type-local add-Dependency is absent without an unresolved-type diagnostic",
+    function()
+      local plugin = type_local_plugin({
+        diagnostics = {
+          {
+            file = JAVA_PATH,
+            code = 33554515,
+            lnum = 3,
+            col = 2,
+            end_lnum = 3,
+            end_col = 41,
+          },
+        },
+      })
+      assert_eq(#plugin:code_actions(), 0)
+    end,
+  },
+  {
+    "UNDEFINED_NAME starting with a capital is a type-local offer",
+    function()
+      local plugin = type_local_plugin({
+        java = [[
+package com.example;
+
+public class App {
+  ImmutableList xs = ImmutableList.of();
+}
+]],
+        diagnostics = {
+          {
+            file = JAVA_PATH,
+            code = 570425394,
+            lnum = 3,
+            col = 2,
+            end_lnum = 3,
+            end_col = 15,
+          },
+        },
+      })
+      local offered = plugin:code_actions()
+      assert_eq(#offered, 1)
+      assert_eq(offered[1].query, "ImmutableList")
+    end,
+  },
+  {
+    "UNDEFINED_NAME starting with lowercase is not a type-local offer",
+    function()
+      local plugin = type_local_plugin({
+        java = [[
+package com.example;
+
+public class App {
+  unknown.foo();
+}
+]],
+        diagnostics = {
+          {
+            file = JAVA_PATH,
+            code = 570425394,
+            lnum = 3,
+            col = 2,
+            end_lnum = 3,
+            end_col = 9,
+          },
+        },
+      })
+      assert_eq(#plugin:code_actions(), 0)
+    end,
+  },
+  {
+    "Init, run, and Package view are not code actions",
+    function()
+      local plugin = type_local_plugin()
+      local offered = plugin:code_actions()
+      assert_eq(#offered, 1)
+      local title = offered[1].title:lower()
+      assert_not_contains(title, "init")
+      assert_not_contains(title, "run")
+      assert_not_contains(title, "package")
+      assert_contains(offered[1].title, "Resolve unknown type")
+    end,
+  },
+  {
+    "choosing the type-local action writes the POM and reloads like the command",
+    function()
+      local plugin, adapters = type_local_plugin({
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      local offered = plugin:code_actions()
+      plugin:apply_code_action(offered[1])
+      local pom = adapters.fs:read("pom.xml")
+      assert_contains(pom, "<groupId>com.google.guava</groupId>")
+      assert_contains(pom, "<artifactId>guava</artifactId>")
+      assert_contains(pom, "<version>33.2.1-jre</version>")
+      assert_eq(adapters.ui.pick_calls, 0)
+      assert_eq(adapters.jdtls.refreshes, 1)
+    end,
+  },
+  {
+    "type-local action on an FQCN writes import and simple name",
+    function()
+      local plugin, adapters = type_local_plugin({
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:apply_code_action(plugin:code_actions()[1])
+      local java = adapters.fs:read("src/main/java/com/example/App.java")
+      assert_contains(java, "import com.google.common.collect.ImmutableList;")
+      assert_contains(java, "  ImmutableList<String> xs;")
+      assert_not_contains(java, "  com.google.common.collect.ImmutableList<String> xs;")
+    end,
+  },
+  {
+    "duplicate GAV still fixes the Java buffer and reloads",
+    function()
+      local pom = [[
+<project>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.4</version>
+  </parent>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>com.google.guava</groupId>
+      <artifactId>guava</artifactId>
+      <version>33.0.0-jre</version>
+    </dependency>
+  </dependencies>
+</project>
+]]
+      local plugin, adapters = type_local_plugin({
+        files = {
+          ["pom.xml"] = pom,
+          ["src/main/java/com/example/App.java"] = FQCN_JAVA,
+        },
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:apply_code_action(plugin:code_actions()[1])
+      assert_eq(adapters.fs:read("pom.xml"), pom)
+      local java = adapters.fs:read("src/main/java/com/example/App.java")
+      assert_contains(java, "import com.google.common.collect.ImmutableList;")
+      assert_contains(java, "  ImmutableList<String> xs;")
+      assert_eq(adapters.jdtls.refreshes, 1)
+    end,
+  },
+  {
+    "type-local action on an unresolved import keeps the import and does not rewrite it",
+    function()
+      local java = [[
+package com.example;
+
+import com.google.common.collect.ImmutableList;
+
+public class App {
+  ImmutableList<String> xs;
+}
+]]
+      local plugin, adapters = type_local_plugin({
+        java = java,
+        diagnostics = {
+          {
+            file = JAVA_PATH,
+            code = 16777218,
+            lnum = 2,
+            col = 7,
+            end_lnum = 2,
+            end_col = 46,
+          },
+        },
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:apply_code_action(plugin:code_actions()[1])
+      assert_eq(adapters.fs:read("src/main/java/com/example/App.java"), java)
+      assert_contains(adapters.fs:read("pom.xml"), "<artifactId>guava</artifactId>")
+    end,
+  },
+  {
+    "type-local Java fix uses the open buffer, not a stale file",
+    function()
+      local plugin, adapters = type_local_plugin({
+        java = FQCN_JAVA,
+        ui = fakes.ui({
+          file = JAVA_PATH,
+          buffer = [[
+package com.example;
+
+public class App {
+  com.google.common.collect.ImmutableList<String> xs;
+  int extra;
+}
+]],
+        }),
+        central = fakes.central({
+          docs = {
+            { g = "com.google.guava", a = "guava", latestVersion = "33.2.1-jre" },
+          },
+        }),
+      })
+      plugin:apply_code_action(plugin:code_actions()[1])
+      local java = adapters.fs:read("src/main/java/com/example/App.java")
+      assert_contains(java, "import com.google.common.collect.ImmutableList;")
+      assert_contains(java, "int extra;")
+    end,
+  },
+  {
+    "type-local Solr failure writes neither POM nor Java buffer",
+    function()
+      local plugin, adapters = type_local_plugin({
+        central = fakes.central({ error = "network" }),
+      })
+      plugin:apply_code_action(plugin:code_actions()[1])
+      assert_contains(fakes.notify_text(adapters.ui), "Maven Central search failed")
+      assert_eq(adapters.fs:read("src/main/java/com/example/App.java"), FQCN_JAVA)
+      assert_eq(#adapters.fs.writes, 0)
+      assert_eq(adapters.jdtls.refreshes, 0)
     end,
   },
 }

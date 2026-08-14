@@ -83,4 +83,18 @@ function M:refresh()
   end
 end
 
+function M:diagnostics(path)
+  if not vim.diagnostic or not vim.diagnostic.get then
+    return {}
+  end
+  local bufnr = 0
+  if path and path ~= "" then
+    bufnr = vim.fn.bufnr(path)
+    if bufnr == -1 then
+      return {}
+    end
+  end
+  return vim.diagnostic.get(bufnr)
+end
+
 return M

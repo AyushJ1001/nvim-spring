@@ -2,6 +2,84 @@ local workspace = require("nvim-spring.workspace")
 local package_view = require("nvim-spring.package_view")
 local dependency = require("nvim-spring.dependency")
 
+-- JDT diagnostic codes (org.eclipse.jdt.core.compiler.IProblem).
+local UNDEFINED_TYPE = "16777218"
+local UNDEFINED_NAME = "570425394"
+
+local function diagnostic_code(diag)
+  if not diag or diag.code == nil then
+    return ""
+  end
+  return tostring(diag.code)
+end
+
+local function split_lines(source)
+  local lines = {}
+  local pos = 1
+  while true do
+    local nl = source:find("\n", pos, true)
+    if not nl then
+      lines[#lines + 1] = source:sub(pos)
+      break
+    end
+    lines[#lines + 1] = source:sub(pos, nl - 1)
+    pos = nl + 1
+  end
+  return lines
+end
+
+local function range_text(source, diag)
+  if not source or not diag or not diag.lnum then
+    return ""
+  end
+  local lines = split_lines(source)
+  local line = lines[diag.lnum + 1]
+  if not line then
+    return ""
+  end
+  local col = diag.col or 0
+  local end_col = diag.end_col or #line
+  return line:sub(col + 1, end_col)
+end
+
+local function simple_name(type_text)
+  return (type_text or ""):match("([%w_]+)$") or type_text
+end
+
+local function is_unresolved_type(diag, type_text)
+  local code = diagnostic_code(diag)
+  if code == UNDEFINED_TYPE then
+    return type_text ~= ""
+  end
+  if code == UNDEFINED_NAME then
+    return type_text:match("^[A-Z]") ~= nil
+  end
+  return false
+end
+
+local function overlaps_cursor(ctx, diag)
+  local lnum = ctx.lnum
+  if ctx.range and ctx.range.lnum ~= nil then
+    lnum = ctx.range.lnum
+  end
+  if lnum == nil then
+    return true
+  end
+  local col = ctx.col or (ctx.range and ctx.range.col) or 0
+  local d1 = diag.lnum or 0
+  local d2 = diag.end_lnum or d1
+  if lnum < d1 or lnum > d2 then
+    return false
+  end
+  if lnum == d1 and col < (diag.col or 0) then
+    return false
+  end
+  if lnum == d2 and diag.end_col and col > diag.end_col then
+    return false
+  end
+  return true
+end
+
 local Actions = {}
 Actions.__index = Actions
 
@@ -62,9 +140,21 @@ function Actions:_bind_keymaps()
   end
 end
 
+function Actions:_register_code_actions()
+  if not self.ui or not self.ui.register_code_actions then
+    return
+  end
+  self.ui:register_code_actions(function(ctx)
+    return self:code_actions(ctx)
+  end, function(action)
+    self:apply_code_action(action)
+  end)
+end
+
 function Actions:setup(opts)
   self:_merge_opts(opts)
   self:_bind_keymaps()
+  self:_register_code_actions()
 end
 
 function Actions:ensure_jdtls()
@@ -101,17 +191,111 @@ function Actions:_reload_project()
   end
 end
 
-function Actions:add_dependency(query)
+local function is_import_line(line)
+  return line:match("^%s*import%s") ~= nil
+end
+
+local function replace_range_with_simple(source, range, fqcn)
+  if not range or range.lnum == nil then
+    return source
+  end
+  local lines = split_lines(source)
+  local i = range.lnum + 1
+  local line = lines[i]
+  if not line or is_import_line(line) then
+    return source
+  end
+  local name = simple_name(fqcn)
+  local col = range.col or 0
+  local end_col = range.end_col or #line
+  lines[i] = line:sub(1, col) .. name .. line:sub(end_col + 1)
+  return table.concat(lines, "\n")
+end
+
+local function ensure_import(source, fqcn)
+  local stmt = "import " .. fqcn .. ";"
+  if source:find(stmt, 1, true) then
+    return source
+  end
+  local lines = split_lines(source)
+  local package_at, last_import
+  for i, line in ipairs(lines) do
+    if line:match("^%s*package%s") then
+      package_at = i
+    elseif line:match("^%s*import%s") then
+      last_import = i
+    end
+  end
+  local at
+  if last_import then
+    at = last_import + 1
+  elseif package_at then
+    at = package_at + 1
+    if lines[at] == "" then
+      at = at + 1
+    else
+      table.insert(lines, at, "")
+      at = at + 1
+    end
+  else
+    table.insert(lines, 1, "")
+    table.insert(lines, 1, stmt)
+    return table.concat(lines, "\n")
+  end
+  table.insert(lines, at, stmt)
+  if lines[at + 1] ~= "" then
+    table.insert(lines, at + 1, "")
+  end
+  return table.concat(lines, "\n")
+end
+
+function Actions:_read_java(path)
+  if self.ui and self.ui.read_buffer then
+    local buf = self.ui:read_buffer(path)
+    if buf then
+      return buf
+    end
+  end
+  if self.fs then
+    return self.fs:read(path)
+  end
+end
+
+function Actions:_write_java(path, content)
+  self.fs:write(path, content)
+  if self.ui and self.ui.edit_buffer then
+    self.ui:edit_buffer(path, content)
+  end
+end
+
+function Actions:_fix_java_buffer(action, hit)
+  if not action or not action.file or not self.fs then
+    return
+  end
+  local fqcn = action.query
+  if not (fqcn and fqcn:find(".", 1, true)) then
+    fqcn = hit and hit.fqcn
+  end
+  if not (fqcn and fqcn:find(".", 1, true)) then
+    return
+  end
+  local source = self:_read_java(action.file)
+  if not source then
+    return
+  end
+  local next_src = replace_range_with_simple(source, action.range, fqcn)
+  next_src = ensure_import(next_src, fqcn)
+  if next_src ~= source then
+    self:_write_java(action.file, next_src)
+  end
+end
+
+function Actions:_add_dependency_query(query, opts)
+  opts = opts or {}
   if not self:_gate() then
     return
   end
   query = query and query:match("^%s*(.-)%s*$") or ""
-  if query == "" then
-    if self.ui.input then
-      query = self.ui:input("Dependency: ") or ""
-    end
-    query = query:match("^%s*(.-)%s*$") or ""
-  end
   if query == "" then
     return
   end
@@ -157,6 +341,7 @@ function Actions:add_dependency(query)
       end
       self.fs:write("pom.xml", next_pom)
     end
+    self:_fix_java_buffer(opts.action, hit)
     self:_reload_project()
   end
 
@@ -167,6 +352,73 @@ function Actions:add_dependency(query)
   if self.ui.pick then
     self.ui:pick(hits, apply)
   end
+end
+
+function Actions:code_actions(ctx)
+  ctx = ctx or {}
+  local jdtls = self.jdtls
+  if not jdtls or not jdtls.is_running or not jdtls:is_running() then
+    return {}
+  end
+
+  local file = ctx.file
+  if not file and self.ui and self.ui.current_file then
+    file = self.ui:current_file()
+  end
+  if not file then
+    return {}
+  end
+
+  local diags = ctx.diagnostics
+  if not diags and jdtls.diagnostics then
+    diags = jdtls:diagnostics(file)
+  end
+  diags = diags or {}
+
+  local source = ctx.source or self:_read_java(file) or ""
+
+  local offered = {}
+  for _, diag in ipairs(diags) do
+    local type_text = range_text(source, diag)
+    if overlaps_cursor(ctx, diag) and is_unresolved_type(diag, type_text) then
+      local name = simple_name(type_text)
+      offered[#offered + 1] = {
+        title = "Resolve unknown type '" .. name .. "'",
+        kind = "quickfix",
+        query = type_text,
+        file = file,
+        range = {
+          lnum = diag.lnum,
+          col = diag.col,
+          end_lnum = diag.end_lnum or diag.lnum,
+          end_col = diag.end_col,
+        },
+      }
+      break
+    end
+  end
+  return offered
+end
+
+function Actions:add_dependency(query)
+  if not self:_gate() then
+    return
+  end
+  query = query and query:match("^%s*(.-)%s*$") or ""
+  if query == "" then
+    if self.ui.input then
+      query = self.ui:input("Dependency: ") or ""
+    end
+    query = query:match("^%s*(.-)%s*$") or ""
+  end
+  self:_add_dependency_query(query)
+end
+
+function Actions:apply_code_action(action)
+  if not action or not action.query then
+    return
+  end
+  self:_add_dependency_query(action.query, { action = action })
 end
 
 function Actions:run()

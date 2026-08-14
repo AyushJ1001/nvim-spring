@@ -92,7 +92,13 @@ function M.search(central, query)
   if err then
     return nil, err
   end
-  return normalize_hits(docs), nil, kind
+  local hits = normalize_hits(docs)
+  if kind == "fqcn" then
+    for _, hit in ipairs(hits) do
+      hit.fqcn = parsed
+    end
+  end
+  return hits, nil, kind
 end
 
 function M.should_auto_apply(kind, hits)
